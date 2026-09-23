@@ -1,0 +1,6 @@
+OBJ.*
+__pycache__/
+*.pyc
+# Publisher-copyrighted papers: kept locally, cited in PLAN.md.
+docs/references/*.pdf
+.venv-anuga/

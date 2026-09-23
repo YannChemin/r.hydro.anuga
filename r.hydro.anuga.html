@@ -1,0 +1,168 @@
+<h2>DESCRIPTION</h2>
+<p><em>r.hydro.anuga</em> simulates overland flow and flooding with the
+shallow-water solver of <a
+href="https://github.com/anuga-community/anuga_core">ANUGA</a>, the
+discontinuous-elevation (DE) finite-volume scheme on triangles. It runs
+in OpenCL on a GPU (or on a CPU OpenCL device such as PoCL), with a
+plain OpenMP fallback.</p>
+<p>The mesh is built directly from one or more DEMs given in
+<strong>elevation</strong>. At each location it uses the finest DEM
+available, for example IGN LiDAR HD or RGE ALTI at 0.5-1 m inside a
+village and a 30 m DEM around it. Resolution levels are powers of two
+between <strong>res_min</strong> and <strong>res_max</strong>. The
+transition between levels is graded over <strong>fringe</strong> cells
+per level. Every square cell is split into triangles fanned from its
+centre: 4 triangles (the ANUGA <code>rectangular_cross</code> pattern),
+or up to 8 next to a finer neighbour, which keeps the mesh
+conforming.</p>
+<p>Forcing can be constant, a raster map, or a space-time raster
+dataset. The latter covers ERA5 rainfall, evaporation, wind and pressure
+imported with <em>t.in.era5</em>. Units are always given explicitly
+(<strong>rain_units</strong>, <strong>evap_units</strong>,
+<strong>pressure_units</strong>); the module never guesses them.
+Infiltration uses Green-Ampt with ponded head
+(<strong>infiltration</strong>=<em>ga</em>, Rawls et al. 1983
+parameters), or Green-Ampt with redistribution between storms
+(<strong>infiltration</strong>=<em>gar</em>, Ogden and Saghafian
+1997).</p>
+<p>Outputs are space-time raster datasets of depth and, on request,
+stage, velocity, speed, direction, unit discharge, Froude number, hazard
+rating and cumulative infiltration. The module can also write rasters of
+maximum depth, speed, stage and hazard, arrival time, inundation
+duration, the mesh level, gauge time series and a mass balance
+report.</p>
+<p><strong>Development status:</strong> phase 2 of the implementation
+plan (<code>PLAN.md</code>). The complete option set is defined and
+validated. The <strong>-p</strong> pre-flight report works: it selects
+the compute device, describes the DEM stack at native resolution, snaps
+the resolution levels, and estimates the number of triangles and the
+device memory. Single-DEM meshes can be built and inspected (mesh-only
+mode, below). The solver runs on the CPU (OpenMP) with
+<strong>state_output</strong> (below); its results are bitwise identical
+to ANUGA's own C kernels. Raster time series (<strong>output</strong>),
+the OpenCL solver, multi-DEM meshes and forcing are not implemented
+yet.</p>
+<h2>NOTES</h2>
+<h3>Compute device</h3>
+<p>With <strong>device</strong>=<em>auto</em>, the first GPU with double
+precision support (<code>cl_khr_fp64</code>) is used, then a CPU OpenCL
+device, then OpenMP. Devices are chosen by capability, not by platform
+order. Each candidate must build a small double precision OpenCL C 1.1
+probe kernel. For example, with Mesa, the rusticl platform may expose a
+GPU without double precision next to the Clover platform exposing the
+same GPU with it; the Clover device is selected.
+<strong>device</strong>=<em>gpu</em> or <em>cpu</em> fail if no such
+device exists, rather than falling back silently.</p>
+<h3>Resolution levels</h3>
+<p><strong>res_min</strong> defaults to the finest DEM resolution.
+<strong>res_max</strong> defaults to the coarsest, rounded up to
+<strong>res_min</strong> times a power of two, and the rounding is
+reported: 1 m and 30 m DEMs give levels of 1, 2, 4, 8, 16 and 32 m. The
+current region must be a whole number of <strong>res_max</strong> cells.
+Otherwise the module stops and prints an aligned <em>g.region</em>
+command. DEMs must have square cells. Latitude-longitude projects are
+not supported.</p>
+<h3>Mesh-only mode</h3>
+<p>With <strong>mesh_output</strong> and/or <strong>mesh_level</strong>
+but no <strong>output</strong>, the module builds the mesh and exits.
+<strong>mesh_level</strong> is a raster of the mesh level of each cell
+of the current region (0 is the coarsest, NULL outside the domain).
+<strong>mesh_output</strong> is a directory with
+<code>manifest.json</code> and one raw binary file per array (node
+coordinates and elevations, triangles, geometry, neighbours, boundary
+edges and tags, fp64 and scaled centroid bed). Coordinates are relative
+to the origin given in the manifest. Arrays follow ANUGA's conventions,
+so they can be loaded into <code>anuga.Domain</code> directly. For a
+single DEM without NULL cells, the mesh is identical, bit for bit, to
+<code>anuga.rectangular_cross</code> (see
+<code>validation/compare_mesh_anuga.py</code>).</p>
+<p>Leaves are active where the DEM has valid cells and, if
+<strong>domain</strong> is given, where the leaf centre lies inside the
+domain. Mesh edges facing an inactive cell carry the boundary tag
+<em>null</em>; edges on the region edge are tagged <em>north</em>,
+<em>south</em>, <em>east</em> or <em>west</em>. Node elevations are
+bilinear between DEM cell centres at leaf corners and the mean of the
+DEM cells inside the leaf at leaf centres. The triangle bed is the mean
+of its three vertices.</p>
+<h3>Solver runs</h3>
+<p>With <strong>state_output</strong> and <strong>duration</strong>
+(seconds), the module runs the solver and writes a directory with
+<code>manifest.json</code> and raw arrays: the initial and final
+centroid stage and momenta, bed, friction, boundary setup, and the time
+of every step. The manifest holds the mass budget: water volume
+(positive depths only, as ANUGA reports it, and signed), the integrated
+boundary flux, and the water added by clamping negative depths. The
+change of the signed volume equals the boundary flux plus the clamping
+mass.</p>
+<p><strong>algorithm</strong> selects ANUGA's DE0 (Euler), DE1
+(second-order Runge-Kutta, default) or DE2 (third-order Runge-Kutta)
+parameter sets. The default CFL numbers are 0.9 (DE0), 0.5 (DE1; ANUGA
+uses 1.0) and 1.0 (DE2); <strong>cfl</strong> overrides them.
+<strong>friction_method</strong> is <em>flat</em> (default, as ANUGA) or
+<em>sloped</em>. <strong>boundary</strong> sets each side
+(<em>north</em>, <em>south</em>, <em>east</em>, <em>west</em>, or
+<em>null</em> for edges facing NULL or masked-out cells) to
+<em>reflective</em> (default), <em>transmissive</em> or
+<em>dirichlet:stage[:xmom:ymom]</em>. <strong>initial_depth</strong> or
+<strong>initial_stage</strong> give the initial water;
+<strong>manning</strong> or <strong>manning_value</strong> give
+Manning's n.</p>
+<p>For thin water films on coarse, steep terrain (typical of
+rain-on-grid), DE1 and DE2 at a CFL of 1 can drive depths negative
+often; clamping them adds water. This is why DE1 defaults to a CFL of
+0.5. The added amount is reported, with a warning above 1% of the
+initial volume; a lower <strong>cfl</strong> or DE0 reduces it further.
+ANUGA behaves identically at the same settings.</p>
+<h3>Elevation precision</h3>
+<p>On the compute device, elevation is stored as unsigned 32-bit
+integers in units of 0.1 mm above an integer datum, and converted back
+exactly. The CPU and GPU paths therefore see bitwise identical terrain.
+Water levels and velocities remain in double precision.</p>
+<h2>EXAMPLES</h2>
+<p>Pre-flight report for a 1 m RGE ALTI tile over a 30 m Copernicus DEM,
+restricted to a watershed mask:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">g.region</span> n=6780000 s=6728992 e=282016 w=230976 res=32</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> <span class="at">-p</span> elevation=rgealti_1m,dem_glo30 domain=anuga_domain</span></code></pre></div>
+<p>Dam break in a closed channel, 60 s, with the solver state written
+out:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">g.region</span> n=200 s=0 e=1000 w=0 res=10</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ex">r.mapcalc</span> <span class="st">&quot;dem = 0&quot;</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">r.mapcalc</span> <span class="st">&quot;h0 = if(x() &lt; 500, 2.0, 0.5)&quot;</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> elevation=dem initial_depth=h0 duration=60 output_step=30 <span class="dt">\</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    state_output=/tmp/dam_break</span></code></pre></div>
+<p>The same report as <code>key=value</code> pairs, for scripts:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> <span class="at">-p</span> elevation=rgealti_1m,dem_glo30 domain=anuga_domain format=shell</span></code></pre></div>
+<p>Build the mesh of a watershed from a 30 m DEM and map it:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">g.region</span> raster=dem_glo30</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> elevation=dem_glo30 domain=anuga_domain <span class="dt">\</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    mesh_level=mesh_level mesh_output=/tmp/plumergat_mesh</span></code></pre></div>
+<h2>REFERENCES</h2>
+<ul>
+<li>Green, W. H., and Ampt, G. A. (1911). Studies on soil physics.
+<em>The Journal of Agricultural Science</em>, 4(1), 1-24.</li>
+<li>Rawls, W. J., Brakensiek, D. L., and Miller, N. (1983). Green-Ampt
+infiltration parameters from soils data. <em>Journal of Hydraulic
+Engineering</em>, 109(1), 62-70.</li>
+<li>Ogden, F. L., and Saghafian, B. (1997). Green and Ampt infiltration
+with redistribution. <em>Journal of Irrigation and Drainage
+Engineering</em>, 123(5), 386-393.</li>
+<li>La Follette, P., Ogden, F. L., and Jan, A. (2023). Layered Green and
+Ampt infiltration with redistribution. <em>Water Resources
+Research</em>, 59, e2022WR033742.</li>
+<li>Fernández-Pato, J., Caviedes-Voullième, D., and García-Navarro, P.
+(2016). Rainfall/runoff simulation with 2D full shallow water equations:
+sensitivity analysis and calibration of infiltration parameters.
+<em>Journal of Hydrology</em>, 536, 496-513.</li>
+</ul>
+<h2>SEE ALSO</h2>
+<p><em><a href="r.hydro.hbv.html">r.hydro.hbv</a>, <a
+href="r.hydro.rri.html">r.hydro.rri</a>, <a
+href="r.sim.water.html">r.sim.water</a>, <a
+href="r.watershed.opencl.html">r.watershed.opencl</a>, <a
+href="t.in.era5.html">t.in.era5</a>, <a
+href="t.rast.list.html">t.rast.list</a></em></p>
+<h2>AUTHORS</h2>
+<p>Yann Chemin. The shallow-water numerics are derived from ANUGA
+(Copyright 2004-2015 Australian National University and Geoscience
+Australia, Apache License 2.0). This addon was developed with AI
+assistance (Claude); see <code>PLAN.md</code>.</p>
