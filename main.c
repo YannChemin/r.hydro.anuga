@@ -23,6 +23,7 @@
 #include <grass/raster.h>
 
 #include "evolve.h"
+#include "kernels_ocl.h"
 #include "mesh.h"
 #include "ocl_backend.h"
 #include "output.h"
@@ -620,16 +621,14 @@ static void run_solver(const struct options *opt, const struct mesh *mesh,
     struct sw_state state;
     struct state_snapshot initial, final;
     struct evolve_log log = {0};
-    const struct solver_ops *ops = &omp_ops;
+    const struct solver_ops *ops =
+        backend->tier == DEV_OMP ? &omp_ops : &ocl_ops;
     double duration, yieldstep;
 
     if (!opt->duration->answer)
         G_fatal_error(_("duration= is required to run the solver"));
     duration = atof(opt->duration->answer);
     yieldstep = atof(opt->output_step->answer);
-    if (backend->tier != DEV_OMP)
-        G_important_message(_("The OpenCL solver is not implemented yet "
-                              "(phase 3 of PLAN.md); running on OpenMP"));
 
     setup_config(&cfg, opt->algorithm->answer, opt->cfl->answer,
                  opt->friction_method->answer);
@@ -640,6 +639,8 @@ static void run_solver(const struct options *opt, const struct mesh *mesh,
     setup_friction(&state, mesh, opt->manning->answer,
                    atof(opt->manning_value->answer));
 
+    if (ops == &ocl_ops)
+        ocl_solver_init(&state, backend);
     snapshot_take(&initial, &state, ops);
     G_message(_("Running %s for %g s (%s tier)..."), opt->algorithm->answer,
               duration, ops->name);
@@ -666,6 +667,8 @@ static void run_solver(const struct options *opt, const struct mesh *mesh,
         state_export(opt->state_output->answer, &state, &initial, &final, &log,
                      duration, yieldstep);
 
+    if (state.device)
+        ocl_solver_free(&state);
     snapshot_free(&initial);
     snapshot_free(&final);
     evolve_log_free(&log);

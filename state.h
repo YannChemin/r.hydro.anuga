@@ -60,6 +60,10 @@ struct sw_state {
     double *stage_siu, *xmom_siu, *ymom_siu;
     double *stage_bk, *xmom_bk, *ymom_bk;
     double *xwork, *ywork, *max_speed;
+
+    /* Device-side state of the OpenCL tier (kernels_ocl.c), NULL for the
+     * OpenMP tier. */
+    void *device;
 };
 
 /* Allocate the state for mesh m. Conserved quantities start dry (stage =

@@ -22,7 +22,9 @@
 
 #define GLOBAL   __global
 #define CONSTANT __constant
-#define KINLINE  inline
+/* Plain functions: OpenCL C 1.1 has no static functions, and C99 inline
+ * semantics could leave a non-inlined call without a definition. */
+#define KINLINE
 typedef int anuga_idx;
 typedef uint anuga_zq;
 typedef long anuga_z0;

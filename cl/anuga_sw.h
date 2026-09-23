@@ -42,7 +42,11 @@
 #ifndef R_HYDRO_ANUGA_CL_SW_H
 #define R_HYDRO_ANUGA_CL_SW_H
 
+/* The OpenCL program is the concatenation of anuga_common.h, this file
+ * and anuga_kernels.cl, so includes are only for the C compilation. */
+#ifndef __OPENCL_VERSION__
 #include "anuga_common.h"
+#endif
 
 #define SW_TINY 1.0e-100
 

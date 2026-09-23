@@ -4,3 +4,4 @@ __pycache__/
 # Publisher-copyrighted papers: kept locally, cited in PLAN.md.
 docs/references/*.pdf
 .venv-anuga/
+ocl_kernels_src.h
