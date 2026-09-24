@@ -66,7 +66,7 @@ or more DEMs.
 | Speed, 4 M triangles, 394 steps | WX 7100: 39 s; 32 CPU threads (Ryzen 9 3950X): 205 s |
 | Plumergat: 30 m GLO-30 watershed (275 km²) with RGE ALTI in the village at 2 m | 5.12 M triangles, 1737 steps, mass conserved, main and 2 m detail time series registered |
 
-The test suite has TESTS_TOTAL pytest tests.
+The test suite has 70 pytest tests.
 
 ## Not implemented
 

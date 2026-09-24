@@ -1186,7 +1186,7 @@ Each phase ends validated, committed, and with the manual updated.
     simulation ("not implemented yet") instead of being ignored; `-p`
     still accepts them to estimate the memory of a complete run.
     `max_timestep=` is honoured (default 1000 s, as ANUGA).
-  - **Tests:** TESTS_TOTAL pytest tests pass on the laptop (PoCL) and on
+  - **Tests:** 70 pytest tests pass on the laptop (PoCL) and on
     the WX 7100 server (Clover), ANUGA comparisons included.
 - **Phase 6 — forcing and infiltration.** (a) Rain, evaporation,
   hyetograph, STRDS with explicit units, then Green–Ampt with soil
