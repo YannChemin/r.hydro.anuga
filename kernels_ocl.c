@@ -38,6 +38,7 @@ enum {
     K_BACKUP,
     K_SAXPY,
     K_VOLUME,
+    K_STATS,
     N_KERNELS
 };
 
@@ -52,7 +53,8 @@ static const char *kernel_names[N_KERNELS] = {"k_protect",
                                               "k_update",
                                               "k_backup",
                                               "k_saxpy",
-                                              "k_volume"};
+                                              "k_volume",
+                                              "k_stats"};
 
 struct ocl_dev {
     const struct ocl_backend *be;
@@ -71,6 +73,8 @@ struct ocl_dev {
     cl_mem stage_bv, xmom_bv, ymom_bv;
     cl_mem stage_eu, xmom_eu, ymom_eu, stage_siu, xmom_siu, ymom_siu;
     cl_mem stage_bk, xmom_bk, ymom_bk, xwork, ywork, max_speed;
+    /* Running statistics (only when s->stats). */
+    cl_mem max_stage, max_depth, stat_max_speed, max_hazard, arrival, duration;
     /* Reduction partials. */
     cl_mem partial_a, partial_b;
     double *host_partial;
@@ -238,6 +242,14 @@ void ocl_solver_init(struct sw_state *s, const struct ocl_backend *backend)
     d->partial_a = buffer(d, NULL, d->n_groups * sizeof(double), 0);
     d->partial_b = buffer(d, NULL, d->n_groups * sizeof(double), 0);
     d->host_partial = G_malloc(d->n_groups * sizeof(double));
+    if (s->stats) {
+        d->max_stage = buffer(d, s->stat_max_stage, dn, 0);
+        d->max_depth = buffer(d, s->stat_max_depth, dn, 0);
+        d->stat_max_speed = buffer(d, s->stat_max_speed, dn, 0);
+        d->max_hazard = buffer(d, s->stat_max_hazard, dn, 0);
+        d->arrival = buffer(d, s->stat_arrival, dn, 0);
+        d->duration = buffer(d, s->stat_duration, dn, 0);
+    }
 
     s->device = d;
 }
@@ -245,20 +257,22 @@ void ocl_solver_init(struct sw_state *s, const struct ocl_backend *backend)
 void ocl_solver_free(struct sw_state *s)
 {
     struct ocl_dev *d = s->device;
-    cl_mem *mems[] = {&d->zq,        &d->centroid,    &d->edge_coords,
-                      &d->normals,   &d->edgelengths, &d->radii,
-                      &d->areas,     &d->neighbours,  &d->neighbour_edges,
-                      &d->surrogate, &d->nbounds,     &d->bnd_tri,
-                      &d->bnd_edge,  &d->bnd_type,    &d->bnd_value,
-                      &d->stage_c,   &d->xmom_c,      &d->ymom_c,
-                      &d->height_c,  &d->friction,    &d->stage_e,
-                      &d->xmom_e,    &d->ymom_e,      &d->height_e,
-                      &d->stage_bv,  &d->xmom_bv,     &d->ymom_bv,
-                      &d->stage_eu,  &d->xmom_eu,     &d->ymom_eu,
-                      &d->stage_siu, &d->xmom_siu,    &d->ymom_siu,
-                      &d->stage_bk,  &d->xmom_bk,     &d->ymom_bk,
-                      &d->xwork,     &d->ywork,       &d->max_speed,
-                      &d->partial_a, &d->partial_b};
+    cl_mem *mems[] = {&d->zq,        &d->centroid,       &d->edge_coords,
+                      &d->normals,   &d->edgelengths,    &d->radii,
+                      &d->areas,     &d->neighbours,     &d->neighbour_edges,
+                      &d->surrogate, &d->nbounds,        &d->bnd_tri,
+                      &d->bnd_edge,  &d->bnd_type,       &d->bnd_value,
+                      &d->stage_c,   &d->xmom_c,         &d->ymom_c,
+                      &d->height_c,  &d->friction,       &d->stage_e,
+                      &d->xmom_e,    &d->ymom_e,         &d->height_e,
+                      &d->stage_bv,  &d->xmom_bv,        &d->ymom_bv,
+                      &d->stage_eu,  &d->xmom_eu,        &d->ymom_eu,
+                      &d->stage_siu, &d->xmom_siu,       &d->ymom_siu,
+                      &d->stage_bk,  &d->xmom_bk,        &d->ymom_bk,
+                      &d->xwork,     &d->ywork,          &d->max_speed,
+                      &d->partial_a, &d->partial_b,      &d->max_stage,
+                      &d->max_depth, &d->stat_max_speed, &d->max_hazard,
+                      &d->arrival,   &d->duration};
     size_t i;
 
     if (!d)
@@ -582,7 +596,55 @@ static void ocl_sync_to_host(struct sw_state *s)
     read_array(d, d->max_speed, s->max_speed, s->n);
 }
 
-const struct solver_ops ocl_ops = {
-    "OpenCL",   ocl_protect,  ocl_extrapolate, ocl_boundaries,
-    ocl_fluxes, ocl_friction, ocl_update,      ocl_backup,
-    ocl_saxpy,  ocl_volume,   ocl_sync_to_host};
+static void ocl_stats(struct sw_state *s, double t, double dt)
+{
+    struct ocl_dev *d = s->device;
+    cl_kernel k = d->k[K_STATS];
+    cl_double ct = t, cdt = dt, vzh = s->velocity_zero_height;
+    cl_double ad = s->arrival_depth;
+    cl_long z0 = s->z0;
+
+    ARG(k, 0, d->n);
+    ARG(k, 1, ct);
+    ARG(k, 2, cdt);
+    ARG(k, 3, vzh);
+    ARG(k, 4, ad);
+    ARG(k, 5, d->zq);
+    ARG(k, 6, z0);
+    ARG(k, 7, d->stage_c);
+    ARG(k, 8, d->xmom_c);
+    ARG(k, 9, d->ymom_c);
+    ARG(k, 10, d->max_stage);
+    ARG(k, 11, d->max_depth);
+    ARG(k, 12, d->stat_max_speed);
+    ARG(k, 13, d->max_hazard);
+    ARG(k, 14, d->arrival);
+    ARG(k, 15, d->duration);
+    run(d, k, d->global_n);
+}
+
+static void ocl_sync_stats_to_host(struct sw_state *s)
+{
+    struct ocl_dev *d = s->device;
+
+    read_array(d, d->max_stage, s->stat_max_stage, s->n);
+    read_array(d, d->max_depth, s->stat_max_depth, s->n);
+    read_array(d, d->stat_max_speed, s->stat_max_speed, s->n);
+    read_array(d, d->max_hazard, s->stat_max_hazard, s->n);
+    read_array(d, d->arrival, s->stat_arrival, s->n);
+    read_array(d, d->duration, s->stat_duration, s->n);
+}
+
+const struct solver_ops ocl_ops = {"OpenCL",
+                                   ocl_protect,
+                                   ocl_extrapolate,
+                                   ocl_boundaries,
+                                   ocl_fluxes,
+                                   ocl_friction,
+                                   ocl_update,
+                                   ocl_backup,
+                                   ocl_saxpy,
+                                   ocl_volume,
+                                   ocl_sync_to_host,
+                                   ocl_stats,
+                                   ocl_sync_stats_to_host};

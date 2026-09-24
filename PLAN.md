@@ -1,13 +1,13 @@
 # r.hydro.anuga: implementation plan
 
-Status: **phases 0–3 done** (2026-09-23). The OpenMP solver is bitwise
+Status: **phases 0–4 done** (2026-09-24). The OpenMP solver is bitwise
 identical to ANUGA's C kernels (phase 2). The OpenCL solver is bitwise
 identical to it without friction, on PoCL and on the WX 7100 (phase 3). Earlier:
 build, options, device
 selection, the `-p` pre-flight report, and single-level mesh construction
 (bitwise identical to `anuga.rectangular_cross`) with the scaled integer
 bed. The solver itself is not implemented yet.
-Revision 8 (2026-09-23), with the user's decisions on the licence, mesh, solver,
+Revision 9 (2026-09-24), with the user's decisions on the licence, mesh, solver,
 infiltration and elevation interpolation, plus the multi-resolution
 DEM requirement.
 
@@ -1074,8 +1074,48 @@ Each phase ends validated, committed, and with the manual updated.
     time-step and boundary-flux partials); removing them is phase 8.
   - 43 pytest tests pass on both hosts. `tests/opencl_test.py` skips
     when no OpenCL device exists.
-- **Phase 4 — outputs, single grid.** STRDS, summary rasters, mass
-  balance, registration. V6.
+- **Phase 4 — outputs, single grid. DONE 2026-09-24.**
+  - **Transfer.** `output.c` builds a triangle → region-cell map once, as
+    compressed rows of (triangle, weight).
+    - A cell at least as large as a leaf takes the area-weighted leaf
+      triangles.
+    - A finer cell takes the triangle containing its centre (a generic
+      point-in-triangle test, ready for phase 5's hanging-node fans).
+    - Depth and stage are weighted means; velocities are
+      momentum-weighted.
+  - **Time series.** `output=` + `outputs=` write the 11 quantities of
+    §8.2 at t = 0, every `output_step` and at the end, as
+    `<output>_<q>_<index>`.
+    - Each quantity is registered with `t.create` + one `t.register
+      file=` (absolute time with `start=`, else relative in seconds) and
+      coloured with `t.rast.colors`.
+    - Maps get units, titles and history. FCELL by default, DCELL with
+      `-d`; dry cells are 0, or NULL with `-n`.
+    - `output_step` must be whole seconds.
+  - **Summaries.** `max_depth`, `max_speed`, `max_stage`, `max_hazard`,
+    `arrival_time`, `inundation_duration` and `final_prefix` use running
+    statistics updated **on the device every step** (`sw_stats`, both
+    tiers).
+    - Speed follows ANUGA's max-quantities operator, with `min_depth` as
+      the velocity-zero height.
+    - Cells take the maximum (the earliest for arrival) over their
+      triangles.
+  - **Mass balance.** `massbalance=` writes a CSV per output time
+    (volumes, boundary inflow, clamping, errors); `-m` prints the final
+    error.
+  - **Safety.** Output names (every indexed map) are checked for legality
+    and existence **before** the mesh is built.
+  - **Results:**
+    - Σ depth × cell area equals the solver volume to 1e-12 at output
+      resolutions of 10, 20 and 40 m on a 10 m mesh.
+    - OpenCL and OpenMP rasters are identical (no friction).
+    - 4 M triangles on the WX 7100 with 14 time-series maps and 2
+      summaries: 38 s, versus 39 s without outputs.
+    - 55 pytest tests pass on both hosts.
+  - **Deferred.**
+    - Asynchronous double-buffered writing (phase 7). Output cost is
+      currently negligible, as measured.
+    - Fine detail grids (`-f`) need multi-level meshes (phase 5).
 - **Phase 5 — multi-resolution.** Multi-DEM stack (native-resolution
   banded reading, bias check, blending), quadtree refinement, 2:1
   balance, fringe dilation, all 16 templates, Morton ordering,

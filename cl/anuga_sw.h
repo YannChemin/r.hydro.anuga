@@ -861,4 +861,46 @@ KINLINE double sw_volume(anuga_idx k, GLOBAL const anuga_zq *zq, anuga_z0 z0,
     return h > 0.0 ? h * areas[k] : 0.0;
 }
 
+/* ---- Running statistics ------------------------------------------------ */
+
+/* Update the running maxima, first arrival time and inundation duration
+ * of triangle k after a step ending at time t of length dt (dt = 0 for the
+ * initial state). Speed follows ANUGA's max-quantities operator
+ * (gpu_max_quantities_operator.c): |momentum| / depth where depth exceeds
+ * vzh, else 0. Hazard is depth * (speed + 0.5). arrival starts negative
+ * (never wet). */
+KINLINE void sw_stats(anuga_idx k, double t, double dt, double vzh,
+                      double arrival_depth, GLOBAL const anuga_zq *zq,
+                      anuga_z0 z0, GLOBAL const double *stage_c,
+                      GLOBAL const double *xmom_c, GLOBAL const double *ymom_c,
+                      GLOBAL double *max_stage, GLOBAL double *max_depth,
+                      GLOBAL double *max_speed, GLOBAL double *max_hazard,
+                      GLOBAL double *arrival, GLOBAL double *duration)
+{
+    double s = stage_c[k];
+    double xm = xmom_c[k], ym = ymom_c[k];
+    double mn = sqrt(xm * xm + ym * ym);
+    double d = s - anuga_bed(zq, z0, k);
+    double v, hz;
+
+    if (d < 0.0)
+        d = 0.0;
+    v = (d > vzh) ? mn / d : 0.0;
+    hz = d * (v + 0.5);
+
+    if (s > max_stage[k])
+        max_stage[k] = s;
+    if (d > max_depth[k])
+        max_depth[k] = d;
+    if (v > max_speed[k])
+        max_speed[k] = v;
+    if (hz > max_hazard[k])
+        max_hazard[k] = hz;
+    if (d > arrival_depth) {
+        if (arrival[k] < 0.0)
+            arrival[k] = t;
+        duration[k] += dt;
+    }
+}
+
 #endif /* R_HYDRO_ANUGA_CL_SW_H */

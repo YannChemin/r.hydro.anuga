@@ -115,6 +115,26 @@ void state_init(struct sw_state *s, const struct mesh *m,
         s->stage_c[k] = anuga_bed(s->zq, s->z0, (anuga_idx)k);
 }
 
+void state_enable_stats(struct sw_state *s, double velocity_zero_height,
+                        double arrival_depth)
+{
+    long k;
+
+    s->stats = 1;
+    s->velocity_zero_height = velocity_zero_height;
+    s->arrival_depth = arrival_depth;
+    s->stat_max_stage = zeros(s->n);
+    s->stat_max_depth = zeros(s->n);
+    s->stat_max_speed = zeros(s->n);
+    s->stat_max_hazard = zeros(s->n);
+    s->stat_arrival = zeros(s->n);
+    s->stat_duration = zeros(s->n);
+    for (k = 0; k < s->n; k++) {
+        s->stat_max_stage[k] = -1.0e100;
+        s->stat_arrival[k] = -1.0;
+    }
+}
+
 void state_free(struct sw_state *s)
 {
     double *arrays[] = {
@@ -128,5 +148,13 @@ void state_free(struct sw_state *s)
     for (i = 0; i < sizeof(arrays) / sizeof(arrays[0]); i++)
         G_free(arrays[i]);
     G_free(s->bnd_type);
+    if (s->stats) {
+        G_free(s->stat_max_stage);
+        G_free(s->stat_max_depth);
+        G_free(s->stat_max_speed);
+        G_free(s->stat_max_hazard);
+        G_free(s->stat_arrival);
+        G_free(s->stat_duration);
+    }
     memset(s, 0, sizeof(*s));
 }

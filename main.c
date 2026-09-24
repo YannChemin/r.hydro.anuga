@@ -614,9 +614,54 @@ static int leaf_is_active(const struct quadtree *qt, const struct leaf *lf,
 
 /* Run the solver on the mesh and export the state (phase 2: OpenMP tier,
  * no raster time series yet). */
-static void run_solver(const struct options *opt, const struct mesh *mesh,
+/* Output options from the parsed module options. */
+static void output_options_init(struct output_options *oo,
+                                const struct options *opt,
+                                const struct flags *flg)
+{
+    memset(oo, 0, sizeof(*oo));
+    oo->basename = opt->output->answer;
+    output_parse_quantities(oo, opt->outputs->answers);
+    oo->min_depth = atof(opt->min_depth->answer);
+    oo->null_dry = flg->null_dry->answer;
+    oo->dcell = flg->dcell->answer;
+    oo->absolute = opt->start->answer != NULL;
+    if (oo->absolute)
+        oo->start_epoch = output_parse_start(opt->start->answer);
+    oo->output_step = atof(opt->output_step->answer);
+    oo->duration = opt->duration->answer ? atof(opt->duration->answer) : 0.0;
+    oo->massbalance = opt->massbalance->answer;
+    oo->print_mass_error = flg->mass_report->answer;
+    oo->max_depth = opt->max_depth->answer;
+    oo->max_speed = opt->max_speed->answer;
+    oo->max_stage = opt->max_stage->answer;
+    oo->max_hazard = opt->max_hazard->answer;
+    oo->arrival_time = opt->arrival_time->answer;
+    oo->inundation_duration = opt->inundation_duration->answer;
+    oo->final_prefix = opt->final_prefix->answer;
+}
+
+static int wants_summaries(const struct output_options *oo)
+{
+    return oo->max_depth || oo->max_speed || oo->max_stage || oo->max_hazard ||
+           oo->arrival_time || oo->inundation_duration;
+}
+
+static int wants_solver(const struct options *opt,
+                        const struct output_options *oo)
+{
+    return oo->basename || wants_summaries(oo) || oo->final_prefix ||
+           oo->massbalance || opt->state_output->answer;
+}
+
+static void run_solver(const struct options *opt,
+                       const struct output_options *oo, const struct mesh *mesh,
+                       const struct quadtree *qt,
                        const struct ocl_backend *backend)
 {
+    struct out_grid grid;
+    struct output_context ctx;
+    int rasters = oo->basename || wants_summaries(oo) || oo->final_prefix;
     struct solver_config cfg;
     struct sw_state state;
     struct state_snapshot initial, final;
@@ -638,13 +683,20 @@ static void run_solver(const struct options *opt, const struct mesh *mesh,
                   opt->initial_stage->answer);
     setup_friction(&state, mesh, opt->manning->answer,
                    atof(opt->manning_value->answer));
+    if (wants_summaries(oo))
+        state_enable_stats(&state, oo->min_depth,
+                           atof(opt->arrival_depth->answer));
+    if (rasters)
+        out_grid_build(&grid, qt, mesh);
 
     if (ops == &ocl_ops)
         ocl_solver_init(&state, backend);
     snapshot_take(&initial, &state, ops);
     G_message(_("Running %s for %g s (%s tier)..."), opt->algorithm->answer,
               duration, ops->name);
-    evolve_run(&state, ops, duration, yieldstep, NULL, NULL, &log);
+    output_begin(&ctx, oo, rasters ? &grid : NULL, &log, &state);
+    evolve_run(&state, ops, duration, yieldstep, output_step_fn, &ctx, &log);
+    output_end(&ctx, &state);
     snapshot_take(&final, &state, ops);
     G_message(_("%ld time steps; water volume %.6g -> %.6g m3 (signed %.6g "
                 "-> %.6g m3), boundary inflow %.6g m3, added by "
@@ -663,9 +715,22 @@ static void run_solver(const struct options *opt, const struct mesh *mesh,
                       ? 100.0 * log.protect_mass / initial.signed_volume
                       : 100.0);
 
+    if (oo->print_mass_error) {
+        double error =
+            final.signed_volume -
+            (initial.signed_volume + log.boundary_mass + log.protect_mass);
+
+        fprintf(stdout, "mass_error=%.17g\nrelative_mass_error=%.17g\n", error,
+                initial.signed_volume != 0.0
+                    ? error / fabs(initial.signed_volume)
+                    : error);
+    }
+
     if (opt->state_output->answer)
         state_export(opt->state_output->answer, &state, &initial, &final, &log,
                      duration, yieldstep);
+    if (rasters)
+        out_grid_free(&grid);
 
     if (state.device)
         ocl_solver_free(&state);
@@ -677,7 +742,9 @@ static void run_solver(const struct options *opt, const struct mesh *mesh,
 
 /* Build the mesh, check the device dequantisation, write the requested
  * mesh outputs, and run the solver if a state output is requested. */
-static void build_and_run(const struct options *opt, const struct preflight *pf,
+static void build_and_run(const struct options *opt,
+                          const struct output_options *oo,
+                          const struct preflight *pf,
                           const struct ocl_backend *backend)
 {
     struct raster_grid dem, domain;
@@ -731,8 +798,8 @@ static void build_and_run(const struct options *opt, const struct preflight *pf,
         mesh_export(&mesh, &qt, opt->mesh_output->answer);
     if (opt->mesh_level->answer)
         output_mesh_level(&qt, opt->mesh_level->answer);
-    if (opt->state_output->answer)
-        run_solver(opt, &mesh, backend);
+    if (wants_solver(opt, oo))
+        run_solver(opt, oo, &mesh, &qt, backend);
 
     mesh_free(&mesh);
     quadtree_free(&qt);
@@ -749,6 +816,7 @@ int main(int argc, char *argv[])
     struct ocl_backend backend;
     struct preflight pf;
     struct memory_options mopt;
+    struct output_options oo;
 
     G_gisinit(argv[0]);
 
@@ -797,19 +865,23 @@ int main(int argc, char *argv[])
 
     check_capacity(&pf, &backend, &opt);
 
-    if (opt.output->answer)
-        G_fatal_error(_("Raster time series outputs (output=) are not "
-                        "implemented yet (phase 4 of PLAN.md). Use -p, "
-                        "mesh_output=/mesh_level=, or state_output= with "
-                        "duration= to run the solver."));
-    if (!opt.mesh_output->answer && !opt.mesh_level->answer &&
-        !opt.state_output->answer)
-        G_fatal_error(_("Nothing to do: give output= (simulation), "
-                        "state_output= (solver state), mesh_output= or "
+    output_options_init(&oo, &opt, &flg);
+    if (flg.detail->answer)
+        G_fatal_error(_("Fine-resolution detail outputs (-f) need "
+                        "multi-DEM meshes (phase 5 of PLAN.md)"));
+    if (!wants_solver(&opt, &oo) && !opt.mesh_output->answer &&
+        !opt.mesh_level->answer)
+        G_fatal_error(_("Nothing to do: give output= or summary rasters "
+                        "(simulation), state_output=, mesh_output= or "
                         "mesh_level= (mesh only), or -p"));
+    if (wants_solver(&opt, &oo)) {
+        if (!opt.duration->answer)
+            G_fatal_error(_("duration= is required to run the solver"));
+        output_check_names(&oo);
+    }
 
     G_set_omp_num_threads(opt.nprocs);
-    build_and_run(&opt, &pf, &backend);
+    build_and_run(&opt, &oo, &pf, &backend);
     ocl_backend_free(&backend);
 
     exit(EXIT_SUCCESS);

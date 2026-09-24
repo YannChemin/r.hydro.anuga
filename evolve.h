@@ -32,6 +32,9 @@ struct solver_ops {
     void (*saxpy)(struct sw_state *s, double a, double b, double c);
     double (*volume)(struct sw_state *s);
     void (*sync_to_host)(struct sw_state *s);
+    /* Running statistics after a step ending at t of length dt. */
+    void (*stats)(struct sw_state *s, double t, double dt);
+    void (*sync_stats_to_host)(struct sw_state *s);
 };
 
 extern const struct solver_ops omp_ops;
@@ -47,9 +50,9 @@ struct evolve_log {
     double protect_mass;  /* Water added by clamping negative depths (m3). */
 };
 
-/* Advance from t = 0 to duration, calling output at every yieldstep and at
- * the end, exactly as ANUGA's evolve() loop (generic_domain.py) caps and
- * accumulates time steps. */
+/* Advance from t = 0 to duration, calling output at t = 0, at every
+ * yieldstep and at the end (with the statistics synchronised too), exactly as
+ * ANUGA's evolve() loop (generic_domain.py) caps and accumulates time steps. */
 void evolve_run(struct sw_state *s, const struct solver_ops *ops,
                 double duration, double yieldstep, output_fn output,
                 void *output_data, struct evolve_log *log);

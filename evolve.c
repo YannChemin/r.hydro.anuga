@@ -146,6 +146,11 @@ void evolve_run(struct sw_state *s, const struct solver_ops *ops,
         log->protect_mass = 0.0;
     }
 
+    if (s->stats)
+        ops->stats(s, 0.0, 0.0);
+    if (output)
+        output(s, 0.0, output_data);
+
     while (1) {
         double max_dt = s->cfg.evolve_max_timestep, remaining, dt;
 
@@ -171,6 +176,8 @@ void evolve_run(struct sw_state *s, const struct solver_ops *ops,
 
         t = t + dt;
         steps++;
+        if (s->stats)
+            ops->stats(s, t, dt);
         if (log) {
             log_step(log, t, dt);
             log->boundary_mass += bmass;
@@ -182,6 +189,8 @@ void evolve_run(struct sw_state *s, const struct solver_ops *ops,
             if (t > duration)
                 G_fatal_error(_("Internal error: time overshot the end time"));
             ops->sync_to_host(s);
+            if (s->stats)
+                ops->sync_stats_to_host(s);
             if (output)
                 output(s, duration, output_data);
             break;

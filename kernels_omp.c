@@ -162,7 +162,19 @@ static void omp_sync_to_host(struct sw_state *s)
     (void)s;
 }
 
+static void omp_stats(struct sw_state *s, double t, double dt)
+{
+    long k;
+
+#pragma omp parallel for schedule(static)
+    for (k = 0; k < s->n; k++)
+        sw_stats((anuga_idx)k, t, dt, s->velocity_zero_height, s->arrival_depth,
+                 s->zq, s->z0, s->stage_c, s->xmom_c, s->ymom_c,
+                 s->stat_max_stage, s->stat_max_depth, s->stat_max_speed,
+                 s->stat_max_hazard, s->stat_arrival, s->stat_duration);
+}
+
 const struct solver_ops omp_ops = {
-    "OpenMP",   omp_protect,  omp_extrapolate, omp_boundaries,
-    omp_fluxes, omp_friction, omp_update,      omp_backup,
-    omp_saxpy,  omp_volume,   omp_sync_to_host};
+    "OpenMP",         omp_protect, omp_extrapolate, omp_boundaries, omp_fluxes,
+    omp_friction,     omp_update,  omp_backup,      omp_saxpy,      omp_volume,
+    omp_sync_to_host, omp_stats,   omp_sync_to_host};

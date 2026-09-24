@@ -61,6 +61,12 @@ struct sw_state {
     double *stage_bk, *xmom_bk, *ymom_bk;
     double *xwork, *ywork, *max_speed;
 
+    /* Running statistics (allocated by state_enable_stats()). */
+    int stats;
+    double velocity_zero_height, arrival_depth;
+    double *stat_max_stage, *stat_max_depth, *stat_max_speed;
+    double *stat_max_hazard, *stat_arrival, *stat_duration;
+
     /* Device-side state of the OpenCL tier (kernels_ocl.c), NULL for the
      * OpenMP tier. */
     void *device;
@@ -70,6 +76,11 @@ struct sw_state {
  * bed, zero momentum), friction zero, all boundaries reflective. */
 void state_init(struct sw_state *s, const struct mesh *m,
                 const struct solver_config *cfg);
+
+/* Allocate the running statistics: maxima start at -1e100 (stage) or 0,
+ * arrival at -1 (never wet), duration at 0. */
+void state_enable_stats(struct sw_state *s, double velocity_zero_height,
+                        double arrival_depth);
 
 void state_free(struct sw_state *s);
 

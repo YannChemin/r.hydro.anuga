@@ -31,17 +31,18 @@ rating and cumulative infiltration. The module can also write rasters of
 maximum depth, speed, stage and hazard, arrival time, inundation
 duration, the mesh level, gauge time series and a mass balance
 report.</p>
-<p><strong>Development status:</strong> phase 2 of the implementation
+<p><strong>Development status:</strong> phase 4 of the implementation
 plan (<code>PLAN.md</code>). The complete option set is defined and
 validated. The <strong>-p</strong> pre-flight report works: it selects
 the compute device, describes the DEM stack at native resolution, snaps
 the resolution levels, and estimates the number of triangles and the
 device memory. Single-DEM meshes can be built and inspected (mesh-only
-mode, below). The solver runs with <strong>state_output</strong>
-(below), on the selected OpenCL device or with OpenMP. Its results are
-bitwise identical to ANUGA's own C kernels (OpenMP; OpenCL too when
-there is no friction). Raster time series (<strong>output</strong>),
-multi-DEM meshes and forcing are not implemented yet.</p>
+mode, below). The solver runs on the selected OpenCL device or with
+OpenMP, and its results are bitwise identical to ANUGA's own C kernels
+(OpenMP; OpenCL too when there is no friction). Raster time series,
+summary rasters and the mass balance table are written as described
+below. Multi-DEM meshes, rainfall and other forcing, and infiltration
+are not implemented yet.</p>
 <h2>NOTES</h2>
 <h3>Compute device</h3>
 <p>With <strong>device</strong>=<em>auto</em>, the first GPU with double
@@ -118,6 +119,66 @@ often; clamping them adds water. This is why DE1 defaults to a CFL of
 0.5. The added amount is reported, with a warning above 1% of the
 initial volume; a lower <strong>cfl</strong> or DE0 reduces it further.
 ANUGA behaves identically at the same settings.</p>
+<h3>Outputs</h3>
+<p>Output rasters are written on the current region. A region cell at
+least as large as the mesh cells takes the area-weighted mean of the
+triangles it contains, so Σ depth × cell area equals the simulated water
+volume. A finer cell takes the value of the triangle containing its
+centre. Velocities are momentum-weighted (Σ uh / Σ h). Cells outside the
+domain are NULL.</p>
+<p>With <strong>output</strong>, each quantity listed in
+<strong>outputs</strong> (default <em>depth</em>) is written at t = 0,
+every <strong>output_step</strong> seconds and at the end, as maps
+<code>&lt;output&gt;_&lt;quantity&gt;_&lt;index&gt;</code>. They are
+registered in a space-time raster dataset
+<code>&lt;output&gt;_&lt;quantity&gt;</code> with a colour table. With
+<strong>start</strong>, times are absolute from that date; otherwise
+they are relative, in seconds. <strong>output_step</strong> must then be
+a whole number of seconds. The quantities are:</p>
+<ul>
+<li><em>depth</em>, <em>stage</em> (m);</li>
+<li><em>xvelocity</em>, <em>yvelocity</em>, <em>speed</em> (m/s);</li>
+<li><em>direction</em> (degrees counter-clockwise from east; NULL where
+still);</li>
+<li><em>discharge</em>, the unit discharge |h u| (m2/s);</li>
+<li><em>xmomentum</em>, <em>ymomentum</em> (m2/s);</li>
+<li><em>froude</em>;</li>
+<li><em>hazard</em>, h (v + 0.5) (m2/s).</li>
+</ul>
+<p>Cells shallower than <strong>min_depth</strong> are dry: depth,
+velocities and derived quantities are written as 0, or as NULL with
+<strong>-n</strong>. <strong>-d</strong> writes DCELL instead of FCELL
+maps.</p>
+<p>The summary rasters use statistics updated on the compute device at
+every time step, not only at output times:</p>
+<ul>
+<li><strong>max_depth</strong>, <strong>max_speed</strong>,
+<strong>max_stage</strong> and <strong>max_hazard</strong>: maxima over
+the contributing triangles.</li>
+<li><strong>arrival_time</strong>: first time the depth exceeds
+<strong>arrival_depth</strong>; NULL where it never does.</li>
+<li><strong>inundation_duration</strong>: total time above
+<strong>arrival_depth</strong>.</li>
+<li><strong>final_prefix</strong>: writes
+<code>&lt;prefix&gt;_stage</code>, <code>_xmom</code> and
+<code>_ymom</code> for a later hot start.</li>
+</ul>
+<p>Speed is zeroed where the depth is at most
+<strong>min_depth</strong>, following ANUGA's maximum-quantities
+operator, whose threshold defaults to 1e-5 m.</p>
+<p><strong>massbalance</strong> writes a CSV table with one line per
+output time:</p>
+<ul>
+<li>time;</li>
+<li>volume (positive depths only);</li>
+<li>signed volume;</li>
+<li>cumulative boundary inflow;</li>
+<li>cumulative water added by clamping negative depths;</li>
+<li>the mass error and the relative error.</li>
+</ul>
+<p><strong>-m</strong> prints the final mass error. Output names are
+checked before the simulation starts, and existing maps are only
+replaced with <strong>--overwrite</strong>.</p>
 <h3>Elevation precision</h3>
 <p>On the compute device, elevation is stored as unsigned 32-bit
 integers in units of 0.1 mm above an integer datum, and converted back
@@ -135,12 +196,22 @@ out:</p>
 <span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">r.mapcalc</span> <span class="st">&quot;h0 = if(x() &lt; 500, 2.0, 0.5)&quot;</span></span>
 <span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> elevation=dem initial_depth=h0 duration=60 output_step=30 <span class="dt">\</span></span>
 <span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    state_output=/tmp/dam_break</span></code></pre></div>
+<p>Dam break with time series of depth and speed from a given date, peak
+maps and a mass balance table:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">g.region</span> n=200 s=0 e=1000 w=0 res=10</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">r.mapcalc</span> <span class="st">&quot;dem = -0.002 * x()&quot;</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="ex">r.mapcalc</span> <span class="st">&quot;h0 = if(x() &lt; 400, 2.0, 0.0)&quot;</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> elevation=dem initial_depth=h0 duration=600 output_step=60 <span class="dt">\</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    start=<span class="st">&quot;2026-01-15 06:00&quot;</span> output=flood outputs=depth,speed <span class="dt">\</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    max_depth=flood_max_depth arrival_time=flood_arrival <span class="dt">\</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    boundary=west:dirichlet:2.5,east:transmissive massbalance=flood.csv</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="ex">t.rast.list</span> flood_depth</span></code></pre></div>
 <p>The same report as <code>key=value</code> pairs, for scripts:</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> <span class="at">-p</span> elevation=rgealti_1m,dem_glo30 domain=anuga_domain format=shell</span></code></pre></div>
+<div class="sourceCode" id="cb4"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> <span class="at">-p</span> elevation=rgealti_1m,dem_glo30 domain=anuga_domain format=shell</span></code></pre></div>
 <p>Build the mesh of a watershed from a 30 m DEM and map it:</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">g.region</span> raster=dem_glo30</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> elevation=dem_glo30 domain=anuga_domain <span class="dt">\</span></span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    mesh_level=mesh_level mesh_output=/tmp/plumergat_mesh</span></code></pre></div>
+<div class="sourceCode" id="cb5"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">g.region</span> raster=dem_glo30</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="ex">r.hydro.anuga</span> elevation=dem_glo30 domain=anuga_domain <span class="dt">\</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    mesh_level=mesh_level mesh_output=/tmp/plumergat_mesh</span></code></pre></div>
 <h2>REFERENCES</h2>
 <ul>
 <li>Green, W. H., and Ampt, G. A. (1911). Studies on soil physics.

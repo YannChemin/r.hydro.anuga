@@ -30,17 +30,17 @@ and cumulative infiltration. The module can also write rasters of
 maximum depth, speed, stage and hazard, arrival time, inundation
 duration, the mesh level, gauge time series and a mass balance report.
 
-**Development status:** phase 2 of the implementation plan
+**Development status:** phase 4 of the implementation plan
 (`PLAN.md`). The complete option set is defined and validated. The
 **-p** pre-flight report works: it selects the compute device,
 describes the DEM stack at native resolution, snaps the resolution
 levels, and estimates the number of triangles and the device memory.
 Single-DEM meshes can be built and inspected (mesh-only mode, below).
-The solver runs with **state_output** (below), on the selected OpenCL
-device or with OpenMP. Its results are bitwise identical to ANUGA's own
-C kernels (OpenMP; OpenCL too when there is no friction). Raster time
-series (**output**), multi-DEM meshes and forcing are not implemented
-yet.
+The solver runs on the selected OpenCL device or with OpenMP, and its
+results are bitwise identical to ANUGA's own C kernels (OpenMP; OpenCL
+too when there is no friction). Raster time series, summary rasters and
+the mass balance table are written as described below. Multi-DEM meshes,
+rainfall and other forcing, and infiltration are not implemented yet.
 
 ## NOTES
 
@@ -122,6 +122,61 @@ often; clamping them adds water. This is why DE1 defaults to a CFL of
 initial volume; a lower **cfl** or DE0 reduces it further. ANUGA
 behaves identically at the same settings.
 
+### Outputs
+
+Output rasters are written on the current region. A region cell at
+least as large as the mesh cells takes the area-weighted mean of the
+triangles it contains, so Σ depth × cell area equals the simulated
+water volume. A finer cell takes the value of the triangle containing
+its centre. Velocities are momentum-weighted (Σ uh / Σ h). Cells outside
+the domain are NULL.
+
+With **output**, each quantity listed in **outputs** (default *depth*)
+is written at t = 0, every **output_step** seconds and at the end, as
+maps `<output>_<quantity>_<index>`. They are registered in a space-time
+raster dataset `<output>_<quantity>` with a colour table. With
+**start**, times are absolute from that date; otherwise they are
+relative, in seconds. **output_step** must then be a whole number of
+seconds. The quantities are:
+
+- *depth*, *stage* (m);
+- *xvelocity*, *yvelocity*, *speed* (m/s);
+- *direction* (degrees counter-clockwise from east; NULL where still);
+- *discharge*, the unit discharge |h u| (m2/s);
+- *xmomentum*, *ymomentum* (m2/s);
+- *froude*;
+- *hazard*, h (v + 0.5) (m2/s).
+
+Cells shallower than **min_depth** are dry: depth, velocities and
+derived quantities are written as 0, or as NULL with **-n**. **-d**
+writes DCELL instead of FCELL maps.
+
+The summary rasters use statistics updated on the compute device at
+every time step, not only at output times:
+- **max_depth**, **max_speed**, **max_stage** and **max_hazard**:
+  maxima over the contributing triangles.
+- **arrival_time**: first time the depth exceeds **arrival_depth**;
+  NULL where it never does.
+- **inundation_duration**: total time above **arrival_depth**.
+- **final_prefix**: writes `<prefix>_stage`, `_xmom` and `_ymom` for a
+  later hot start.
+
+Speed is zeroed where the depth is at most **min_depth**, following
+ANUGA's maximum-quantities operator, whose threshold defaults to
+1e-5 m.
+
+**massbalance** writes a CSV table with one line per output time:
+- time;
+- volume (positive depths only);
+- signed volume;
+- cumulative boundary inflow;
+- cumulative water added by clamping negative depths;
+- the mass error and the relative error.
+
+**-m** prints the final mass error. Output names are checked before the
+simulation starts, and existing maps are only replaced with
+**--overwrite**.
+
 ### Elevation precision
 
 On the compute device, elevation is stored as unsigned 32-bit integers
@@ -148,6 +203,20 @@ r.mapcalc "dem = 0"
 r.mapcalc "h0 = if(x() < 500, 2.0, 0.5)"
 r.hydro.anuga elevation=dem initial_depth=h0 duration=60 output_step=30 \
     state_output=/tmp/dam_break
+```
+
+Dam break with time series of depth and speed from a given date, peak
+maps and a mass balance table:
+
+```sh
+g.region n=200 s=0 e=1000 w=0 res=10
+r.mapcalc "dem = -0.002 * x()"
+r.mapcalc "h0 = if(x() < 400, 2.0, 0.0)"
+r.hydro.anuga elevation=dem initial_depth=h0 duration=600 output_step=60 \
+    start="2026-01-15 06:00" output=flood outputs=depth,speed \
+    max_depth=flood_max_depth arrival_time=flood_arrival \
+    boundary=west:dirichlet:2.5,east:transmissive massbalance=flood.csv
+t.rast.list flood_depth
 ```
 
 The same report as `key=value` pairs, for scripts:

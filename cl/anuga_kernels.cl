@@ -236,3 +236,20 @@ __kernel void k_volume(int n, __global const uint *zq, long z0,
     buf[get_local_id(0)] = k < n ? sw_volume(k, zq, z0, stage_c, areas) : 0.0;
     wg_reduce_sum(buf, partial);
 }
+
+__kernel void k_stats(int n, double t, double dt, double vzh,
+                      double arrival_depth, __global const uint *zq, long z0,
+                      __global const double *stage_c,
+                      __global const double *xmom_c,
+                      __global const double *ymom_c,
+                      __global double *max_stage, __global double *max_depth,
+                      __global double *max_speed, __global double *max_hazard,
+                      __global double *arrival, __global double *duration)
+{
+    int k = get_global_id(0);
+
+    if (k < n)
+        sw_stats(k, t, dt, vzh, arrival_depth, zq, z0, stage_c, xmom_c, ymom_c,
+                 max_stage, max_depth, max_speed, max_hazard, arrival,
+                 duration);
+}

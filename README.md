@@ -5,16 +5,18 @@ elevation finite volumes) in OpenCL, on a multi-resolution mesh built
 directly from one or more DEMs, with ERA5/STRDS forcing and Green-Ampt
 infiltration.
 
-**Status:** phases 0–3 of [PLAN.md](PLAN.md) are done. The build, the
-full option set, OpenCL device selection and the `-p` pre-flight report
-work. Single-DEM meshes are bitwise identical to
-`anuga.rectangular_cross`. The solver is bitwise identical to ANUGA's
-own C kernels (DE0/DE1/DE2, friction, reflective, transmissive and
-Dirichlet boundaries) on the CPU (OpenMP). The OpenCL version on a GPU
-(tested on a Radeon Pro WX 7100) is bitwise identical to it without
-friction, and within a few ulp with friction; it is 5.3x faster than 32
-CPU threads on 4 M triangles. Raster outputs, multi-DEM meshes and
-forcing come next.
+**Status:** phases 0–4 of [PLAN.md](PLAN.md) are done.
+- **Mesh:** single-DEM meshes are bitwise identical to
+  `anuga.rectangular_cross`.
+- **Solver:** bitwise identical to ANUGA's own C kernels on the CPU
+  (OpenMP). The OpenCL version on a GPU (tested on a Radeon Pro WX 7100)
+  matches it bitwise without friction, and within a few ulp with
+  friction. It is 5.3x faster than 32 CPU threads on 4 M triangles.
+- **Outputs:** depth, velocity, hazard and other time series are
+  registered as space-time raster datasets. Maximum, arrival-time and
+  duration maps and a mass balance table are also written.
+
+Multi-DEM meshes, rainfall/ERA5 forcing and infiltration come next.
 
 ## Build
 

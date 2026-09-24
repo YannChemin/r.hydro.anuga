@@ -98,6 +98,6 @@ def test_latlong_fails(latlong_tools):
         dry_run(latlong_tools, elevation="dem")
 
 
-def test_simulation_not_implemented(dual_dem):
-    with pytest.raises(ToolError, match="not\s+implemented yet"):
+def test_duration_required(dual_dem):
+    with pytest.raises(ToolError, match="duration= is required"):
         dual_dem.r_hydro_anuga(elevation="coarse", output="sim", device="omp")
