@@ -590,16 +590,19 @@ static void check_capacity(const struct preflight *pf,
 /* Leaf activity for the uniform quadtree: the leaf must contain valid
  * DEM cells and, if a domain map is given, its centre must be inside. */
 struct activity {
-    const struct raster_grid *dem;
+    const struct dem_stack *dem;
     const struct raster_grid *domain;
 };
 
+/* A leaf is active if some DEM has data in it (or at its centre, for
+ * leaves smaller than the DEM cells) and, with domain=, its centre is
+ * inside the domain. */
 static int leaf_is_active(const struct quadtree *qt, const struct leaf *lf,
                           void *data)
 {
     const struct activity *act = data;
     double size = quadtree_leaf_size(qt, lf), x, y;
-    long count;
+    int i;
 
     quadtree_leaf_origin(qt, lf, &x, &y);
     x += qt->west;
@@ -607,9 +610,41 @@ static int leaf_is_active(const struct quadtree *qt, const struct leaf *lf,
     if (act->domain &&
         isnan(raster_grid_nearest(act->domain, x + 0.5 * size, y + 0.5 * size)))
         return 0;
-    raster_grid_box_mean(act->dem, x, y, x + size, y + size, &count);
+    for (i = 0; i < act->dem->n; i++) {
+        const struct dem_layer *l = &act->dem->layers[i];
 
-    return count > 0;
+        if (dem_layer_count(l, x, y, x + size, y + size) > 0 ||
+            !isnan(raster_grid_nearest(&l->grid, x + 0.5 * size,
+                                       y + 0.5 * size)))
+            return 1;
+    }
+
+    return 0;
+}
+
+static long long layer_count(const void *data, double x0, double y0,
+                             double x1, double y1)
+{
+    return dem_layer_count(data, x0, y0, x1, y1);
+}
+
+/* Valid cells of a refine= map whose centres lie in the box. */
+static long long grid_count(const void *data, double x0, double y0, double x1,
+                            double y1)
+{
+    long count;
+
+    raster_grid_box_mean(data, x0, y0, x1, y1, &count);
+
+    return count;
+}
+
+/* Level whose cell size is the largest not above res (clamped). */
+static int level_for_res(const struct preflight *pf, double res)
+{
+    int level = (int)floor(log2(pf->res_max / res) + 1e-6);
+
+    return level < 0 ? 0 : (level >= pf->n_levels ? pf->n_levels - 1 : level);
 }
 
 /* Run the solver on the mesh and export the state (phase 2: OpenMP tier,
@@ -747,22 +782,24 @@ static void build_and_run(const struct options *opt,
                           const struct preflight *pf,
                           const struct ocl_backend *backend)
 {
-    struct raster_grid dem, domain;
+    struct dem_stack dem;
+    struct raster_grid domain, refine;
+    struct footprint footprints[MAX_DEMS + 1];
+    int n_footprints = 0, i;
     struct activity act;
     struct quadtree qt;
     struct mesh mesh;
     double *z;
     long k, mismatches;
 
-    if (pf->n_dems > 1)
-        G_fatal_error(_("Meshes from several DEMs are not implemented yet "
-                        "(phase 5 of PLAN.md); give a single elevation map"));
-    if (pf->n_levels > 1)
-        G_fatal_error(_("Multi-level meshes are not implemented yet (phase 5 "
-                        "of PLAN.md); res_min and res_max must be equal"));
+    if (opt->coarsen->answer || opt->relief_tolerance->answer)
+        G_fatal_error(_("coarsen= and relief_tolerance= are not implemented "
+                        "yet (phase 8 of PLAN.md)"));
 
-    G_message(_("Reading elevation map <%s>..."), pf->dems[0].name);
-    raster_grid_load(&dem, pf->dems[0].name);
+    dem_stack_load(&dem, pf, opt->elevation->answers,
+                   opt->dem_offset->answers,
+                   atof(opt->dem_bias_tolerance->answer),
+                   atof(opt->blend_width->answer));
     act.dem = &dem;
     act.domain = NULL;
     if (opt->domain->answer) {
@@ -771,7 +808,51 @@ static void build_and_run(const struct options *opt,
     }
 
     G_message(_("Selecting active cells..."));
-    quadtree_build_uniform(&qt, pf->res_max, leaf_is_active, &act);
+    if (pf->n_levels == 1 && !opt->refine->answer) {
+        quadtree_build_uniform(&qt, pf->res_max, leaf_is_active, &act);
+    }
+    else {
+        for (i = 0; i < dem.n; i++) {
+            const struct dem_layer *l = &dem.layers[i];
+
+            if (l->level == 0)
+                continue;
+            footprints[n_footprints].level = l->level;
+            footprints[n_footprints].west = l->grid.win.west;
+            footprints[n_footprints].south = l->grid.win.south;
+            footprints[n_footprints].east = l->grid.win.east;
+            footprints[n_footprints].north = l->grid.win.north;
+            footprints[n_footprints].count = layer_count;
+            footprints[n_footprints].data = l;
+            n_footprints++;
+        }
+        if (opt->refine->answer) {
+            raster_grid_load(&refine, opt->refine->answer);
+            footprints[n_footprints].level =
+                level_for_res(pf, atof(opt->refine_res->answer));
+            footprints[n_footprints].west = refine.win.west;
+            footprints[n_footprints].south = refine.win.south;
+            footprints[n_footprints].east = refine.win.east;
+            footprints[n_footprints].north = refine.win.north;
+            footprints[n_footprints].count = grid_count;
+            footprints[n_footprints].data = &refine;
+            n_footprints++;
+        }
+        quadtree_build_graded(&qt, pf->res_max, pf->n_levels,
+                              atoi(opt->fringe->answer), footprints,
+                              n_footprints, leaf_is_active, &act);
+        if (opt->refine->answer)
+            raster_grid_free(&refine);
+    }
+    {
+        long per_level[MAX_LEVELS] = {0};
+
+        for (k = 0; k < qt.n_leaves; k++)
+            per_level[qt.leaves[k].level]++;
+        for (i = 0; i < qt.n_levels; i++)
+            G_verbose_message(_("Level %d (%g m): %ld cells"), i,
+                              ldexp(qt.res_max, -i), per_level[i]);
+    }
     mesh_build(&mesh, &qt, &dem);
     G_message(_("Mesh: %ld triangles, %ld nodes, %ld boundary edges"),
               mesh.n_tri, mesh.n_nodes, mesh.n_boundary);
@@ -803,7 +884,7 @@ static void build_and_run(const struct options *opt,
 
     mesh_free(&mesh);
     quadtree_free(&qt);
-    raster_grid_free(&dem);
+    dem_stack_free(&dem);
     if (act.domain)
         raster_grid_free(&domain);
 }

@@ -16,8 +16,8 @@
 
 #include <stdint.h>
 
+#include "dem_stack.h"
 #include "quadtree.h"
-#include "sampler.h"
 
 /* Boundary tags of edges without a neighbouring triangle. */
 enum boundary_tag { TAG_NORTH, TAG_SOUTH, TAG_EAST, TAG_WEST, TAG_NULL };
@@ -70,11 +70,12 @@ struct mesh {
     double max_quantization_error; /* max |dequantized - fp64| (m) */
 };
 
-/* Build the mesh from the quadtree leaves, taking node elevations from
- * dem (bilinear between cell centres at corners, mean of the DEM cells
- * inside the leaf at leaf centres), then quantize the centroid bed. */
+/* Build the mesh from the quadtree leaves (with their hanging-node
+ * masks), taking node elevations from the DEM stack (bilinear between
+ * cell centres at corners and hanging nodes, mean of the governing DEM's
+ * cells inside the leaf at leaf centres), then quantize the centroid bed. */
 void mesh_build(struct mesh *m, const struct quadtree *qt,
-                const struct raster_grid *dem);
+                const struct dem_stack *dem);
 
 void mesh_free(struct mesh *m);
 

@@ -36,7 +36,7 @@ enum { SIDE_W, SIDE_S, SIDE_E, SIDE_N };
 struct builder {
     struct mesh *m;
     const struct quadtree *qt;
-    const struct raster_grid *dem;
+    const struct dem_stack *dem;
     struct hashmap nodes; /* doubled finest-grid key -> node index */
     long node_capacity;
     int64_t unit; /* Doubled finest-grid units per level-0 cell. */
@@ -69,7 +69,7 @@ static int32_t get_node(struct builder *b, int64_t gx, int64_t gy, double x,
     m->node_key[idx] = (int64_t)key;
     if (!isfinite(elevation))
         elevation =
-            raster_grid_bilinear(b->dem, m->origin_x + x, m->origin_y + y);
+            dem_stack_point(b->dem, m->origin_x + x, m->origin_y + y);
     if (!isfinite(elevation))
         G_fatal_error(_("No elevation available at mesh node (%.3f, %.3f)"),
                       m->origin_x + x, m->origin_y + y);
@@ -96,7 +96,6 @@ static void emit_leaf(struct builder *b, long leaf_index, int hanging)
     double y0 = lf->iy * size, y1 = (lf->iy + 1) * size;
     int32_t bl, tl, tr, br, c, corners[4][2];
     double cx, cy, zc;
-    long count;
     int side;
 
     bl = get_node(b, gx0, gy0, x0, y0, NAN);
@@ -109,10 +108,9 @@ static void emit_leaf(struct builder *b, long leaf_index, int hanging)
      * the last bit. */
     cx = (lf->ix + 0.5) * size;
     cy = (lf->iy + 0.5) * size;
-    zc = raster_grid_box_mean(b->dem, m->origin_x + x0, m->origin_y + y0,
-                              m->origin_x + x1, m->origin_y + y1, &count);
-    c = get_node(b, gx0 + span / 2, gy0 + span / 2, cx, cy,
-                 count > 0 ? zc : NAN);
+    zc = dem_stack_box_mean(b->dem, m->origin_x + x0, m->origin_y + y0,
+                            m->origin_x + x1, m->origin_y + y1);
+    c = get_node(b, gx0 + span / 2, gy0 + span / 2, cx, cy, zc);
 
     /* Clockwise perimeter segments per side. */
     corners[SIDE_W][0] = bl;
@@ -373,7 +371,7 @@ static void compute_bed(struct mesh *m)
 }
 
 void mesh_build(struct mesh *m, const struct quadtree *qt,
-                const struct raster_grid *dem)
+                const struct dem_stack *dem)
 {
     struct builder b;
     int64_t gmax;
@@ -392,11 +390,15 @@ void mesh_build(struct mesh *m, const struct quadtree *qt,
         G_fatal_error(_("Mesh too large: %lld finest cells across"),
                       (long long)(gmax / 2));
 
-    /* Phase 1: no hanging nodes, 4 triangles and 1 centre per leaf; the
-     * corners are shared, so nodes <= 4 per leaf plus the boundary row. */
-    max_tri = 4 * qt->n_leaves;
-    b.node_capacity =
-        2 * qt->n_leaves + qt->nx0 + qt->ny0 + 2 + 2 * qt->n_leaves;
+    /* 4 triangles per leaf plus one per hanging node; nodes are at most
+     * the 4 corners, the hanging nodes and the centre of every leaf. */
+    max_tri = 0;
+    for (k = 0; k < qt->n_leaves; k++) {
+        int h = qt->leaves[k].hanging;
+
+        max_tri += 4 + (h & 1) + ((h >> 1) & 1) + ((h >> 2) & 1) + (h >> 3);
+    }
+    b.node_capacity = qt->n_leaves + max_tri + 16;
     hashmap_init(&b.nodes, b.node_capacity);
 
     m->node_xy = G_malloc(2 * b.node_capacity * sizeof(double));
@@ -408,7 +410,7 @@ void mesh_build(struct mesh *m, const struct quadtree *qt,
     G_message(_("Building mesh triangles..."));
     for (k = 0; k < qt->n_leaves; k++) {
         G_percent(k, qt->n_leaves, 5);
-        emit_leaf(&b, k, 0);
+        emit_leaf(&b, k, qt->leaves[k].hanging);
     }
     G_percent(1, 1, 1);
     hashmap_free(&b.nodes);

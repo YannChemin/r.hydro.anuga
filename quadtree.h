@@ -21,6 +21,19 @@
 struct leaf {
     int level;
     int32_t ix, iy;
+    uint8_t hanging; /* Sides (1 << W, S, E, N) split by a finer leaf. */
+};
+
+/* An area requiring at least a given level (a DEM footprint or a refine=
+ * map). count() returns the number of valid cells whose centres lie in the
+ * box [x0, x1) x [y0, y1) (absolute coordinates); the bounding box limits
+ * where it is queried. */
+struct footprint {
+    int level;
+    double west, south, east, north;
+    long long (*count)(const void *data, double x0, double y0, double x1,
+                       double y1);
+    const void *data;
 };
 
 struct quadtree {
@@ -41,6 +54,17 @@ typedef int (*leaf_active_fn)(const struct quadtree *qt, const struct leaf *lf,
  * region extent must be a whole number of res_max cells. */
 void quadtree_build_uniform(struct quadtree *qt, double res_max,
                             leaf_active_fn active, void *data);
+
+/* Build a graded quadtree with levels 0 .. n_levels - 1: every footprint
+ * is covered by leaves of at least its level, and around every region of
+ * level m there are at least `fringe` leaves of level m - 1 (PLAN.md
+ * section 4.4), which also guarantees 2:1 balance. Leaves are kept if
+ * active() returns non-zero, then sorted in Morton order and their
+ * hanging-node masks computed. */
+void quadtree_build_graded(struct quadtree *qt, double res_max, int n_levels,
+                           int fringe, const struct footprint *footprints,
+                           int n_footprints, leaf_active_fn active,
+                           void *data);
 
 void quadtree_free(struct quadtree *qt);
 
