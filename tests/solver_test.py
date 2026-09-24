@@ -241,9 +241,9 @@ def test_mass_balance_identity_with_clamping(tools, tmp_path, algorithm):
     """Signed volume change = boundary flux + water added by clamping
     negative depths, weighted by the Runge-Kutta coefficients. A thin film
     on steep terrain makes DE1/DE2 (CFL 1) clamp a lot, as in ANUGA."""
-    tools.g_region(n=600, s=0, e=600, w=0, res=30)
-    tools.r_mapcalc(expression="dem = 20 * sin(x() / 90) * cos(y() / 70) + 0.05 * x()")
-    tools.r_mapcalc(expression="h0 = 0.05")
+    tools.g_region(n=900, s=0, e=900, w=0, res=30)
+    tools.r_mapcalc(expression="dem = 40 * sin(x() / 60) * cos(y() / 50) + 0.1 * x()")
+    tools.r_mapcalc(expression="h0 = 0.02")
     _, (m, _st), *_ = run(
         tools,
         tmp_path,
@@ -257,4 +257,6 @@ def test_mass_balance_identity_with_clamping(tools, tmp_path, algorithm):
     )
     change = m["final_signed_volume"] - m["initial_signed_volume"]
     budget = m["boundary_mass"] + m["protect_mass"]
+    if algorithm != "DE0":
+        assert m["protect_mass"] > 0  # The case really exercises clamping.
     assert abs(change - budget) <= 1e-9 * m["initial_signed_volume"]

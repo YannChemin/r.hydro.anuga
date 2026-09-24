@@ -36,10 +36,11 @@ duration, the mesh level, gauge time series and a mass balance report.
 describes the DEM stack at native resolution, snaps the resolution
 levels, and estimates the number of triangles and the device memory.
 Single-DEM meshes can be built and inspected (mesh-only mode, below).
-The solver runs on the CPU (OpenMP) with **state_output** (below); its
-results are bitwise identical to ANUGA's own C kernels. Raster time
-series (**output**), the OpenCL solver, multi-DEM meshes and forcing
-are not implemented yet.
+The solver runs with **state_output** (below), on the selected OpenCL
+device or with OpenMP. Its results are bitwise identical to ANUGA's own
+C kernels (OpenMP; OpenCL too when there is no friction). Raster time
+series (**output**), multi-DEM meshes and forcing are not implemented
+yet.
 
 ## NOTES
 
@@ -53,6 +54,12 @@ with Mesa, the rusticl platform may expose a GPU without double
 precision next to the Clover platform exposing the same GPU with it;
 the Clover device is selected. **device**=*gpu* or *cpu* fail if no
 such device exists, rather than falling back silently.
+
+The solver runs on the selected device. OpenCL guarantees correctly
+rounded double arithmetic and square roots, so the OpenCL and OpenMP
+solvers give bitwise identical results without friction. Manning
+friction uses a power function whose OpenCL accuracy is a few units in
+the last place, so results then differ at the 1e-15 relative level.
 
 ### Resolution levels
 

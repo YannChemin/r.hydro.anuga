@@ -5,14 +5,16 @@ elevation finite volumes) in OpenCL, on a multi-resolution mesh built
 directly from one or more DEMs, with ERA5/STRDS forcing and Green-Ampt
 infiltration.
 
-**Status:** phases 0–2 of [PLAN.md](PLAN.md) are done. The build, the
+**Status:** phases 0–3 of [PLAN.md](PLAN.md) are done. The build, the
 full option set, OpenCL device selection and the `-p` pre-flight report
 work. Single-DEM meshes are bitwise identical to
-`anuga.rectangular_cross`. The CPU (OpenMP) solver is bitwise identical
-to ANUGA's own C kernels (DE0/DE1/DE2, friction, reflective,
-transmissive and Dirichlet boundaries) and passes the lake-at-rest and
-dam-break validations. Raster outputs, the OpenCL solver, multi-DEM
-meshes and forcing come next.
+`anuga.rectangular_cross`. The solver is bitwise identical to ANUGA's
+own C kernels (DE0/DE1/DE2, friction, reflective, transmissive and
+Dirichlet boundaries) on the CPU (OpenMP). The OpenCL version on a GPU
+(tested on a Radeon Pro WX 7100) is bitwise identical to it without
+friction, and within a few ulp with friction; it is 5.3x faster than 32
+CPU threads on 4 M triangles. Raster outputs, multi-DEM meshes and
+forcing come next.
 
 ## Build
 
@@ -65,6 +67,7 @@ PATH=$PWD/.venv-anuga/bin:$PATH .venv-anuga/bin/pip install \
 | `output.c/.h` | raster outputs (`mesh_level=`) |
 | `cl/anuga_common.h`, `cl/anuga_sw.h` | solver kernel bodies shared by C and OpenCL C 1.1 |
 | `kernels_omp.c` | OpenMP tier |
+| `cl/anuga_kernels.cl`, `kernels_ocl.c/.h` | OpenCL tier (kernels embedded at build time) |
 | `state.c/.h`, `setup.c/.h`, `evolve.c/.h` | solver state, option setup, time stepping |
 | `validation/` | comparison scripts run with ANUGA's Python |
 | `tests/` | pytest suite |

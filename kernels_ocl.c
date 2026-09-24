@@ -41,11 +41,18 @@ enum {
     N_KERNELS
 };
 
-static const char *kernel_names[N_KERNELS] = {
-    "k_protect",       "k_extrapolate_pass1", "k_extrapolate_pass2",
-    "k_extrapolate_pass3", "k_boundaries",   "k_fluxes",
-    "k_friction_flat", "k_friction_sloped",   "k_update",
-    "k_backup",        "k_saxpy",             "k_volume"};
+static const char *kernel_names[N_KERNELS] = {"k_protect",
+                                              "k_extrapolate_pass1",
+                                              "k_extrapolate_pass2",
+                                              "k_extrapolate_pass3",
+                                              "k_boundaries",
+                                              "k_fluxes",
+                                              "k_friction_flat",
+                                              "k_friction_sloped",
+                                              "k_update",
+                                              "k_backup",
+                                              "k_saxpy",
+                                              "k_volume"};
 
 struct ocl_dev {
     const struct ocl_backend *be;
@@ -96,7 +103,8 @@ static cl_mem buffer(const struct ocl_dev *d, const void *host, size_t bytes,
  * work-group size over all kernels. */
 static size_t build(struct ocl_dev *d, size_t wg)
 {
-    const size_t n_lines = sizeof(ocl_kernel_lines) / sizeof(ocl_kernel_lines[0]);
+    const size_t n_lines =
+        sizeof(ocl_kernel_lines) / sizeof(ocl_kernel_lines[0]);
     char options[128];
     size_t min_wg = (size_t)-1;
     cl_int err;
@@ -200,8 +208,8 @@ void ocl_solver_init(struct sw_state *s, const struct ocl_backend *backend)
     d->bnd_tri = buffer(d, nb ? s->bnd_tri : NULL, nb * sizeof(anuga_idx), 1);
     d->bnd_edge = buffer(d, nb ? s->bnd_edge : NULL, nb * sizeof(anuga_idx), 1);
     d->bnd_type = buffer(d, nb ? s->bnd_type : NULL, nb * sizeof(anuga_u8), 1);
-    d->bnd_value = buffer(d, nb ? s->bnd_value : NULL, 3 * nb * sizeof(double),
-                          1);
+    d->bnd_value =
+        buffer(d, nb ? s->bnd_value : NULL, 3 * nb * sizeof(double), 1);
 
     d->stage_c = buffer(d, s->stage_c, dn, 0);
     d->xmom_c = buffer(d, s->xmom_c, dn, 0);
@@ -237,18 +245,20 @@ void ocl_solver_init(struct sw_state *s, const struct ocl_backend *backend)
 void ocl_solver_free(struct sw_state *s)
 {
     struct ocl_dev *d = s->device;
-    cl_mem *mems[] = {
-        &d->zq,        &d->centroid,  &d->edge_coords, &d->normals,
-        &d->edgelengths, &d->radii,   &d->areas,       &d->neighbours,
-        &d->neighbour_edges, &d->surrogate, &d->nbounds, &d->bnd_tri,
-        &d->bnd_edge,  &d->bnd_type,  &d->bnd_value,   &d->stage_c,
-        &d->xmom_c,    &d->ymom_c,    &d->height_c,    &d->friction,
-        &d->stage_e,   &d->xmom_e,    &d->ymom_e,      &d->height_e,
-        &d->stage_bv,  &d->xmom_bv,   &d->ymom_bv,     &d->stage_eu,
-        &d->xmom_eu,   &d->ymom_eu,   &d->stage_siu,   &d->xmom_siu,
-        &d->ymom_siu,  &d->stage_bk,  &d->xmom_bk,     &d->ymom_bk,
-        &d->xwork,     &d->ywork,     &d->max_speed,   &d->partial_a,
-        &d->partial_b};
+    cl_mem *mems[] = {&d->zq,        &d->centroid,    &d->edge_coords,
+                      &d->normals,   &d->edgelengths, &d->radii,
+                      &d->areas,     &d->neighbours,  &d->neighbour_edges,
+                      &d->surrogate, &d->nbounds,     &d->bnd_tri,
+                      &d->bnd_edge,  &d->bnd_type,    &d->bnd_value,
+                      &d->stage_c,   &d->xmom_c,      &d->ymom_c,
+                      &d->height_c,  &d->friction,    &d->stage_e,
+                      &d->xmom_e,    &d->ymom_e,      &d->height_e,
+                      &d->stage_bv,  &d->xmom_bv,     &d->ymom_bv,
+                      &d->stage_eu,  &d->xmom_eu,     &d->ymom_eu,
+                      &d->stage_siu, &d->xmom_siu,    &d->ymom_siu,
+                      &d->stage_bk,  &d->xmom_bk,     &d->ymom_bk,
+                      &d->xwork,     &d->ywork,       &d->max_speed,
+                      &d->partial_a, &d->partial_b};
     size_t i;
 
     if (!d)
@@ -263,8 +273,8 @@ void ocl_solver_free(struct sw_state *s)
 }
 
 /* Kernel argument helpers. */
-#define ARG(kernel, i, value)                                                  \
-    check(clSetKernelArg((kernel), (i), sizeof(value), &(value)),              \
+#define ARG(kernel, i, value)                                     \
+    check(clSetKernelArg((kernel), (i), sizeof(value), &(value)), \
           "clSetKernelArg")
 
 static void run(const struct ocl_dev *d, cl_kernel kernel, size_t global)
@@ -273,8 +283,8 @@ static void run(const struct ocl_dev *d, cl_kernel kernel, size_t global)
 
     if (global == 0)
         return;
-    check(clEnqueueNDRangeKernel(d->be->queue, kernel, 1, NULL, &global,
-                                 &local, 0, NULL, NULL),
+    check(clEnqueueNDRangeKernel(d->be->queue, kernel, 1, NULL, &global, &local,
+                                 0, NULL, NULL),
           "clEnqueueNDRangeKernel");
 }
 

@@ -1,12 +1,13 @@
 # r.hydro.anuga: implementation plan
 
-Status: **phases 0, 1 and 2 done** (2026-09-23). The OpenMP solver is
-bitwise identical to ANUGA's C kernels; see phase 2 below. Earlier:
+Status: **phases 0–3 done** (2026-09-23). The OpenMP solver is bitwise
+identical to ANUGA's C kernels (phase 2). The OpenCL solver is bitwise
+identical to it without friction, on PoCL and on the WX 7100 (phase 3). Earlier:
 build, options, device
 selection, the `-p` pre-flight report, and single-level mesh construction
 (bitwise identical to `anuga.rectangular_cross`) with the scaled integer
 bed. The solver itself is not implemented yet.
-Revision 7 (2026-09-23), with the user's decisions on the licence, mesh, solver,
+Revision 8 (2026-09-23), with the user's decisions on the licence, mesh, solver,
 infiltration and elevation interpolation, plus the multi-resolution
 DEM requirement.
 
@@ -1033,9 +1034,46 @@ Each phase ends validated, committed, and with the manual updated.
        default algorithm (D3) for rain-on-grid; see R4.
   - `friction_method=` defaults to **flat**, as ANUGA does; the plan
     previously said sloped, which was wrong.
-- **Phase 3 — OpenCL tier.** Wrappers, buffers, reductions,
-  `-cl-std=CL1.1`, build-log reporting. V1/V4 on PoCL, then V13 on
-  Clover.
+- **Phase 3 — OpenCL tier. DONE 2026-09-23.**
+  - **Kernels.** `cl/anuga_kernels.cl` holds 12 thin `__kernel` wrappers
+    around the bodies of `cl/anuga_sw.h`, so there is still one copy of
+    the physics.
+    - The time-step minimum and the boundary-flux, clamping-mass and
+      volume sums reduce per work-group in local memory (OpenCL 1.1).
+    - The host combines the partials in group order, so results are
+      deterministic.
+    - The program is `anuga_common.h + anuga_sw.h + anuga_kernels.cl`,
+      embedded by the Makefile as an array of lines
+      (`ocl_kernels_src.h`) and built with `-cl-std=CL1.1 -DWG=<size>`.
+      There are no static or inline functions in the OpenCL build.
+  - **Host.** `kernels_ocl.c` provides a second `solver_ops` table over
+    device buffers.
+    - Every array is uploaded once after setup, and synchronised back
+      only at outputs.
+    - The work-group size is the largest power of two, at most 256, that
+      every kernel accepts.
+    - `evolve.c` is unchanged. `device=` now selects the solver tier too.
+  - **V13 results (all tiers):**
+    - Without friction, OpenCL is **bitwise identical** to OpenMP, and
+      hence to ANUGA, on both PoCL and Clover (WX 7100), for DE0, DE1
+      and DE2 and all boundary types. OpenCL requires correctly rounded
+      double `+ − × ÷` and `sqrt`.
+    - With Manning friction, `pow()` is only accurate to a few ulp in
+      OpenCL. The largest relative difference after 903 steps is 3e-15
+      (stage), with identical step counts.
+    - Lake at rest and the mass-balance identity also hold on OpenCL.
+  - **Performance.** 4 M triangles (10 km × 10 km at 10 m), 394 DE1
+    steps, 60 s simulated:
+
+    | Tier (server) | Wall time |
+    |---|---|
+    | OpenMP, Ryzen 9 3950X, 32 threads | 205 s |
+    | OpenCL, WX 7100 | 39 s, end to end, **5.3×** |
+
+    Each substep still does three small blocking reads (clamping mass,
+    time-step and boundary-flux partials); removing them is phase 8.
+  - 43 pytest tests pass on both hosts. `tests/opencl_test.py` skips
+    when no OpenCL device exists.
 - **Phase 4 — outputs, single grid.** STRDS, summary rasters, mass
   balance, registration. V6.
 - **Phase 5 — multi-resolution.** Multi-DEM stack (native-resolution

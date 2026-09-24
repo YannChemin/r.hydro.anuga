@@ -351,9 +351,9 @@ static void define_options(struct options *opt, struct flags *flg)
     opt->min_timestep = opt_value(
         "min_timestep", TYPE_DOUBLE, "1e-6",
         _("Minimum time step before a stall is reported (s)"), timing);
-    opt->cfl = opt_value(
-        "cfl", TYPE_DOUBLE, NULL,
-        _("CFL number (default: DE0 0.9, DE1 0.5, DE2 1.0)"), timing);
+    opt->cfl =
+        opt_value("cfl", TYPE_DOUBLE, NULL,
+                  _("CFL number (default: DE0 0.9, DE1 0.5, DE2 1.0)"), timing);
     opt->algorithm = opt_choice("algorithm", "DE0,DE1,DE2", "DE1",
                                 _("ANUGA flow algorithm"), timing);
     opt->algorithm->descriptions = _("DE0;Euler, CFL 0.9, beta 0.5;"
