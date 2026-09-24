@@ -235,5 +235,9 @@ def test_detail_outputs(tools):
     )
     main = tools.r_info(map="ml_depth_002", flags="g").keyval
     assert float(main["nsres"]) == 8
+    # r.univar reads through the current region: use the detail grid's.
+    tools.g_region(raster="ml_maxd_detail1")
     maxd = tools.r_univar(map="ml_maxd_detail1", format="json").json
     assert maxd["n"] == 128 * 128
+    depth = tools.r_univar(map="ml_detail1_depth_002", format="json").json
+    assert depth["n"] == 128 * 128

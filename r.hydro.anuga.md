@@ -30,19 +30,24 @@ and cumulative infiltration. The module can also write rasters of
 maximum depth, speed, stage and hazard, arrival time, inundation
 duration, the mesh level, gauge time series and a mass balance report.
 
-**Development status:** phase 5 of the implementation plan
-(`PLAN.md`). The complete option set is defined and validated. The
-**-p** pre-flight report works: it selects the compute device,
-describes the DEM stack at native resolution, snaps the resolution
-levels, and estimates the number of triangles and the device memory.
-Single-DEM meshes can be built and inspected (mesh-only mode, below).
-The solver runs on the selected OpenCL device or with OpenMP, and its
-results are bitwise identical to ANUGA's own C kernels (OpenMP; OpenCL
-too when there is no friction). Raster time series, summary rasters and
-the mass balance table are written as described below. Meshes built
-from several DEMs at different resolutions work as described below.
-Rainfall and other forcing, and infiltration, are not implemented
-yet.
+**Development status:** phases 0 to 5 of the implementation plan
+(`PLAN.md`) are complete. The **-p** pre-flight report selects the
+compute device, describes the DEM stack at native resolution, snaps the
+resolution levels, and estimates the number of triangles and the device
+memory. Meshes are built from one or several DEMs at different
+resolutions. The solver runs on the selected OpenCL device or with
+OpenMP, and its results are bitwise identical to ANUGA's own C kernels
+(OpenMP; OpenCL too when there is no friction). Raster time series,
+summary rasters, detail outputs and the mass balance table are written
+as described below.
+
+Rainfall, evaporation, wind and pressure forcing, inflows, stage
+boundaries, infiltration, gauges, **end**,
+**min_timestep**, **coarsen** and **relief_tolerance** are not
+implemented yet (`PLAN.md`, phases 6 to 9). Their options are defined
+so that **-p** can estimate the memory of a complete run, but a
+simulation given any of them stops with an error instead of ignoring
+it.
 
 ## NOTES
 
@@ -142,7 +147,8 @@ the clamping mass.
 **algorithm** selects ANUGA's DE0 (Euler), DE1 (second-order
 Runge-Kutta, default) or DE2 (third-order Runge-Kutta) parameter sets.
 The default CFL numbers are 0.9 (DE0), 0.5 (DE1; ANUGA uses 1.0) and 1.0
-(DE2); **cfl** overrides them. **friction_method** is *flat*
+(DE2); **cfl** overrides them. **max_timestep** caps the time step
+(default 1000 s, as ANUGA). **friction_method** is *flat*
 (default, as ANUGA) or *sloped*. **boundary** sets each side (*north*,
 *south*, *east*, *west*, or *null* for edges facing NULL or
 masked-out cells) to *reflective* (default), *transmissive* or

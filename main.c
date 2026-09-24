@@ -349,7 +349,7 @@ static void define_options(struct options *opt, struct flags *flg)
     opt->max_timestep = opt_value("max_timestep", TYPE_DOUBLE, NULL,
                                   _("Maximum time step (seconds)"), timing);
     opt->min_timestep = opt_value(
-        "min_timestep", TYPE_DOUBLE, "1e-6",
+        "min_timestep", TYPE_DOUBLE, NULL,
         _("Minimum time step before a stall is reported (s)"), timing);
     opt->cfl =
         opt_value("cfl", TYPE_DOUBLE, NULL,
@@ -494,7 +494,7 @@ static double parse_positive(const struct Option *o)
 }
 
 /* Checks that do not need any data. Units are never guessed. */
-static void validate(const struct options *opt)
+static void validate(const struct options *opt, int preflight)
 {
     if ((opt->rain->answer || opt->rain_strds->answer ||
          opt->rain_value->answer || opt->rain_hyetograph->answer) &&
@@ -517,6 +517,53 @@ static void validate(const struct options *opt)
                       opt->infiltration->answer);
     if (atoi(opt->fringe->answer) < 1)
         G_fatal_error(_("fringe= must be at least 1"));
+
+    /* Options defined for the full design (PLAN.md) but not implemented:
+     * refuse them rather than ignore them. The -p report still accepts
+     * them, as it estimates the memory of the full design. */
+    if (!preflight) {
+        const struct Option *pending[] = {opt->rain,
+                                          opt->rain_strds,
+                                          opt->rain_value,
+                                          opt->rain_hyetograph,
+                                          opt->evap,
+                                          opt->evap_strds,
+                                          opt->wind_u_strds,
+                                          opt->wind_v_strds,
+                                          opt->pressure_strds,
+                                          opt->inflow,
+                                          opt->inflow_series,
+                                          opt->stage_series,
+                                          opt->landcover,
+                                          opt->manning_rules,
+                                          opt->buildings,
+                                          opt->initial_xmom,
+                                          opt->initial_ymom,
+                                          opt->soil_texture,
+                                          opt->soil_table,
+                                          opt->ks,
+                                          opt->suction,
+                                          opt->porosity,
+                                          opt->soil_depth,
+                                          opt->impervious,
+                                          opt->gauges,
+                                          opt->gauge_output,
+                                          opt->end,
+                                          opt->min_timestep,
+                                          opt->coarsen,
+                                          opt->relief_tolerance};
+        size_t i;
+
+        for (i = 0; i < sizeof(pending) / sizeof(pending[0]); i++)
+            if (pending[i]->answer)
+                G_fatal_error(_("Option %s= is not implemented yet (see "
+                                "PLAN.md, phases 6-9)"),
+                              pending[i]->key);
+        if (strcmp(opt->infiltration->answer, "none") != 0)
+            G_fatal_error(_("infiltration=%s is not implemented yet (see "
+                            "PLAN.md section 6)"),
+                          opt->infiltration->answer);
+    }
     parse_positive(opt->res_min);
     parse_positive(opt->res_max);
     parse_positive(opt->output_step);
@@ -753,6 +800,8 @@ static void run_solver(const struct options *opt,
 
     setup_config(&cfg, opt->algorithm->answer, opt->cfl->answer,
                  opt->friction_method->answer);
+    if (opt->max_timestep->answer)
+        cfg.evolve_max_timestep = parse_positive(opt->max_timestep);
     state_init(&state, mesh, &cfg);
     setup_boundaries(&state, mesh, opt->boundary->answers);
     setup_initial(&state, mesh, opt->initial_depth->answer,
@@ -972,7 +1021,7 @@ int main(int argc, char *argv[])
     if (G_parser(argc, argv))
         exit(EXIT_FAILURE);
 
-    validate(&opt);
+    validate(&opt, flg.dry_run->answer);
 
     if (!ocl_backend_init(&backend, opt.device->answer))
         G_fatal_error(_("Unable to initialize the '%s' compute backend"),

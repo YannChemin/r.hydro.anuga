@@ -1172,6 +1172,22 @@ Each phase ends validated, committed, and with the manual updated.
     OpenMP identical but would lose bitwise equality with ANUGA, which
     uses glibc `pow`. This could be an option (e.g. `-r`) if
     cross-device reproducibility matters.
+  - **Plumergat dual DEM** (`testdata/plumergat/`): GLO-30 over the
+    BD TOPAGE watershed domain (275 km²) and IGN RGE ALTI 1 m over the
+    village, `res_min=2`, `-f`, PoCL on the laptop CPU.
+    - Bias check: median −0.261 m, MAD 0.823 m (within tolerance).
+    - Levels 32/16/8/4/2 m with 263 661 / 2 308 / 4 398 / 9 080 /
+      1 000 000 leaves: 5 121 612 triangles.
+    - 1737 steps for 60 s in 57 min 21 s; volume conserved; `plm_depth`
+      and the 2 m `plm_detail1_depth` (1000 × 1000) registered.
+    - The global time step set by the 2 m cells dominates the cost;
+      local time stepping (phase 9) is the remedy.
+  - **Closing changes.** Options of phases 6–9 are refused by a
+    simulation ("not implemented yet") instead of being ignored; `-p`
+    still accepts them to estimate the memory of a complete run.
+    `max_timestep=` is honoured (default 1000 s, as ANUGA).
+  - **Tests:** TESTS_TOTAL pytest tests pass on the laptop (PoCL) and on
+    the WX 7100 server (Clover), ANUGA comparisons included.
 - **Phase 6 — forcing and infiltration.** (a) Rain, evaporation,
   hyetograph, STRDS with explicit units, then Green–Ampt with soil
   table, direct rasters, `soil_depth`, `impervious`: V7i, V8i, V10.

@@ -31,18 +31,25 @@ rating and cumulative infiltration. The module can also write rasters of
 maximum depth, speed, stage and hazard, arrival time, inundation
 duration, the mesh level, gauge time series and a mass balance
 report.</p>
-<p><strong>Development status:</strong> phase 4 of the implementation
-plan (<code>PLAN.md</code>). The complete option set is defined and
-validated. The <strong>-p</strong> pre-flight report works: it selects
-the compute device, describes the DEM stack at native resolution, snaps
-the resolution levels, and estimates the number of triangles and the
-device memory. Single-DEM meshes can be built and inspected (mesh-only
-mode, below). The solver runs on the selected OpenCL device or with
-OpenMP, and its results are bitwise identical to ANUGA's own C kernels
-(OpenMP; OpenCL too when there is no friction). Raster time series,
-summary rasters and the mass balance table are written as described
-below. Multi-DEM meshes, rainfall and other forcing, and infiltration
-are not implemented yet.</p>
+<p><strong>Development status:</strong> phases 0 to 5 of the
+implementation plan (<code>PLAN.md</code>) are complete. The
+<strong>-p</strong> pre-flight report selects the compute device,
+describes the DEM stack at native resolution, snaps the resolution
+levels, and estimates the number of triangles and the device memory.
+Meshes are built from one or several DEMs at different resolutions. The
+solver runs on the selected OpenCL device or with OpenMP, and its
+results are bitwise identical to ANUGA's own C kernels (OpenMP; OpenCL
+too when there is no friction). Raster time series, summary rasters,
+detail outputs and the mass balance table are written as described
+below.</p>
+<p>Rainfall, evaporation, wind and pressure forcing, inflows, stage
+boundaries, infiltration, gauges, <strong>end</strong>,
+<strong>min_timestep</strong>, <strong>coarsen</strong> and
+<strong>relief_tolerance</strong> are not implemented yet
+(<code>PLAN.md</code>, phases 6 to 9). Their options are defined so that
+<strong>-p</strong> can estimate the memory of a complete run, but a
+simulation given any of them stops with an error instead of ignoring
+it.</p>
 <h2>NOTES</h2>
 <h3>Compute device</h3>
 <p>With <strong>device</strong>=<em>auto</em>, the first GPU with double
@@ -68,6 +75,34 @@ current region must be a whole number of <strong>res_max</strong> cells.
 Otherwise the module stops and prints an aligned <em>g.region</em>
 command. DEMs must have square cells. Latitude-longitude projects are
 not supported.</p>
+<h3>Several DEMs</h3>
+<p>When <strong>elevation</strong> lists several DEMs, each is read at
+its own resolution. At each location the finest DEM with data governs
+the elevation (with <strong>-o</strong>, the order given is the priority
+order). Its resolution sets the mesh level there.
+<strong>res_min</strong> coarsens the finest level if needed.</p>
+<p>Around each finer area the mesh steps down one level at a time, with
+at least <strong>fringe</strong> cells of every intermediate level. For
+example, 2 m cells are surrounded by bands of 4, 8 and 16 m cells before
+reaching 32 m. Neighbouring cells always differ by at most one level. A
+cell next to a finer neighbour is split into 5 to 8 triangles instead of
+4, so the mesh stays conforming.</p>
+<p><strong>refine</strong> (with <strong>refine_res</strong>) requests a
+finer resolution over any other area, such as a channel or a dike.</p>
+<p>Before meshing, each DEM is compared with the next coarser one where
+they overlap. If the median vertical difference exceeds
+<strong>dem_bias_tolerance</strong> (default 0.5 m), the module stops
+and reports it. Mixing vertical datums (for example NGF-IGN69 altitudes
+and EGM2008 geoid heights) is a common cause. The difference is never
+corrected silently: give <strong>dem_offset</strong> (one value per map
+of <strong>elevation</strong>, in the same order) to apply a correction
+explicitly. Within tolerance, the seam is blended smoothly over
+<strong>blend_width</strong> cells of the coarser DEM, inside the finer
+DEM's footprint. Region edges are not treated as seams.</p>
+<p>With <strong>-f</strong>, every output (time series, summary rasters
+and final state) is also written on a detail grid over each finer DEM's
+footprint, at that DEM's mesh resolution. The names get the suffix
+<code>_detail1</code>, <code>_detail2</code>, and so on.</p>
 <h3>Mesh-only mode</h3>
 <p>With <strong>mesh_output</strong> and/or <strong>mesh_level</strong>
 but no <strong>output</strong>, the module builds the mesh and exits.
@@ -104,8 +139,9 @@ mass.</p>
 (second-order Runge-Kutta, default) or DE2 (third-order Runge-Kutta)
 parameter sets. The default CFL numbers are 0.9 (DE0), 0.5 (DE1; ANUGA
 uses 1.0) and 1.0 (DE2); <strong>cfl</strong> overrides them.
-<strong>friction_method</strong> is <em>flat</em> (default, as ANUGA) or
-<em>sloped</em>. <strong>boundary</strong> sets each side
+<strong>max_timestep</strong> caps the time step (default 1000 s, as
+ANUGA). <strong>friction_method</strong> is <em>flat</em> (default, as
+ANUGA) or <em>sloped</em>. <strong>boundary</strong> sets each side
 (<em>north</em>, <em>south</em>, <em>east</em>, <em>west</em>, or
 <em>null</em> for edges facing NULL or masked-out cells) to
 <em>reflective</em> (default), <em>transmissive</em> or

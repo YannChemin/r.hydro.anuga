@@ -101,3 +101,29 @@ def test_latlong_fails(latlong_tools):
 def test_duration_required(dual_dem):
     with pytest.raises(ToolError, match="duration= is required"):
         dual_dem.r_hydro_anuga(elevation="coarse", output="sim", device="omp")
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        {"rain_value": 10, "rain_units": "mm/h"},
+        {"initial_xmom": "coarse"},
+        {"gauge_output": "g.csv"},
+        {"stage_series": "s.csv"},
+        {"min_timestep": 0.001},
+        {
+            "infiltration": "ga",
+            "ks": "coarse",
+            "suction": "coarse",
+            "porosity": "coarse",
+        },
+    ],
+)
+def test_unimplemented_options_are_refused(dual_dem, option):
+    """Options of the full design that are not implemented fail loudly
+    instead of being ignored (-p still accepts them for its estimate)."""
+    dry_run(dual_dem, elevation="coarse", **option)
+    with pytest.raises(ToolError, match=r"not\s+implemented"):
+        dual_dem.r_hydro_anuga(
+            elevation="coarse", duration=1, output="sim", device="omp", **option
+        )
