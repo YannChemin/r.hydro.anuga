@@ -614,16 +614,16 @@ static int leaf_is_active(const struct quadtree *qt, const struct leaf *lf,
         const struct dem_layer *l = &act->dem->layers[i];
 
         if (dem_layer_count(l, x, y, x + size, y + size) > 0 ||
-            !isnan(raster_grid_nearest(&l->grid, x + 0.5 * size,
-                                       y + 0.5 * size)))
+            !isnan(
+                raster_grid_nearest(&l->grid, x + 0.5 * size, y + 0.5 * size)))
             return 1;
     }
 
     return 0;
 }
 
-static long long layer_count(const void *data, double x0, double y0,
-                             double x1, double y1)
+static long long layer_count(const void *data, double x0, double y0, double x1,
+                             double y1)
 {
     return dem_layer_count(data, x0, y0, x1, y1);
 }
@@ -660,6 +660,7 @@ static void output_options_init(struct output_options *oo,
     oo->min_depth = atof(opt->min_depth->answer);
     oo->null_dry = flg->null_dry->answer;
     oo->dcell = flg->dcell->answer;
+    oo->detail = flg->detail->answer;
     oo->absolute = opt->start->answer != NULL;
     if (oo->absolute)
         oo->start_epoch = output_parse_start(opt->start->answer);
@@ -689,12 +690,52 @@ static int wants_solver(const struct options *opt,
            oo->massbalance || opt->state_output->answer;
 }
 
+/* Output window of the detail grid of a DEM layer: its footprint snapped
+ * to the leaf grid of its level, at that level's cell size. */
+static void detail_window(struct Cell_head *win, const struct dem_layer *l,
+                          const struct quadtree *qt)
+{
+    struct Cell_head region;
+    double size = ldexp(qt->res_max, -l->level);
+
+    G_get_window(&region);
+    *win = region;
+    win->west =
+        region.west +
+        floor((fmax(l->grid.win.west, region.west) - region.west) / size) *
+            size;
+    win->south =
+        region.south +
+        floor((fmax(l->grid.win.south, region.south) - region.south) / size) *
+            size;
+    win->east =
+        region.west +
+        ceil((fmin(l->grid.win.east, region.east) - region.west) / size) * size;
+    win->north =
+        region.south +
+        ceil((fmin(l->grid.win.north, region.north) - region.south) / size) *
+            size;
+    win->ew_res = win->ns_res = size;
+    G_adjust_Cell_head(win, 0, 0);
+}
+
+static int count_detail_layers(const struct preflight *pf)
+{
+    int i, n = 0;
+
+    for (i = 0; i < pf->n_dems; i++)
+        n += pf->dems[i].level > 0;
+
+    return n;
+}
+
 static void run_solver(const struct options *opt,
                        const struct output_options *oo, const struct mesh *mesh,
-                       const struct quadtree *qt,
+                       const struct quadtree *qt, const struct dem_stack *dem,
                        const struct ocl_backend *backend)
 {
-    struct out_grid grid;
+    struct out_grid grids[MAX_OUT_GRIDS];
+    int n_grids = 0, i;
     struct output_context ctx;
     int rasters = oo->basename || wants_summaries(oo) || oo->final_prefix;
     struct solver_config cfg;
@@ -721,15 +762,29 @@ static void run_solver(const struct options *opt,
     if (wants_summaries(oo))
         state_enable_stats(&state, oo->min_depth,
                            atof(opt->arrival_depth->answer));
-    if (rasters)
-        out_grid_build(&grid, qt, mesh);
+    if (rasters) {
+        out_grid_build(&grids[n_grids++], qt, mesh, NULL, "");
+        if (oo->detail)
+            for (i = 0; i < dem->n; i++) {
+                struct Cell_head win;
+                char suffix[32];
+
+                if (dem->layers[i].level == 0)
+                    continue;
+                detail_window(&win, &dem->layers[i], qt);
+                snprintf(suffix, sizeof(suffix), "_detail%d", n_grids);
+                G_verbose_message(_("Detail grid %s: %d x %d cells at %g m"),
+                                  suffix, win.cols, win.rows, win.ew_res);
+                out_grid_build(&grids[n_grids++], qt, mesh, &win, suffix);
+            }
+    }
 
     if (ops == &ocl_ops)
         ocl_solver_init(&state, backend);
     snapshot_take(&initial, &state, ops);
     G_message(_("Running %s for %g s (%s tier)..."), opt->algorithm->answer,
               duration, ops->name);
-    output_begin(&ctx, oo, rasters ? &grid : NULL, &log, &state);
+    output_begin(&ctx, oo, rasters ? grids : NULL, n_grids, &log, &state);
     evolve_run(&state, ops, duration, yieldstep, output_step_fn, &ctx, &log);
     output_end(&ctx, &state);
     snapshot_take(&final, &state, ops);
@@ -764,8 +819,8 @@ static void run_solver(const struct options *opt,
     if (opt->state_output->answer)
         state_export(opt->state_output->answer, &state, &initial, &final, &log,
                      duration, yieldstep);
-    if (rasters)
-        out_grid_free(&grid);
+    for (i = 0; i < n_grids; i++)
+        out_grid_free(&grids[i]);
 
     if (state.device)
         ocl_solver_free(&state);
@@ -796,8 +851,7 @@ static void build_and_run(const struct options *opt,
         G_fatal_error(_("coarsen= and relief_tolerance= are not implemented "
                         "yet (phase 8 of PLAN.md)"));
 
-    dem_stack_load(&dem, pf, opt->elevation->answers,
-                   opt->dem_offset->answers,
+    dem_stack_load(&dem, pf, opt->elevation->answers, opt->dem_offset->answers,
                    atof(opt->dem_bias_tolerance->answer),
                    atof(opt->blend_width->answer));
     act.dem = &dem;
@@ -880,7 +934,7 @@ static void build_and_run(const struct options *opt,
     if (opt->mesh_level->answer)
         output_mesh_level(&qt, opt->mesh_level->answer);
     if (wants_solver(opt, oo))
-        run_solver(opt, oo, &mesh, &qt, backend);
+        run_solver(opt, oo, &mesh, &qt, &dem, backend);
 
     mesh_free(&mesh);
     quadtree_free(&qt);
@@ -947,9 +1001,6 @@ int main(int argc, char *argv[])
     check_capacity(&pf, &backend, &opt);
 
     output_options_init(&oo, &opt, &flg);
-    if (flg.detail->answer)
-        G_fatal_error(_("Fine-resolution detail outputs (-f) need "
-                        "multi-DEM meshes (phase 5 of PLAN.md)"));
     if (!wants_solver(&opt, &oo) && !opt.mesh_output->answer &&
         !opt.mesh_level->answer)
         G_fatal_error(_("Nothing to do: give output= or summary rasters "
@@ -958,7 +1009,7 @@ int main(int argc, char *argv[])
     if (wants_solver(&opt, &oo)) {
         if (!opt.duration->answer)
             G_fatal_error(_("duration= is required to run the solver"));
-        output_check_names(&oo);
+        output_check_names(&oo, oo.detail ? count_detail_layers(&pf) : 0);
     }
 
     G_set_omp_num_threads(opt.nprocs);

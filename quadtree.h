@@ -63,8 +63,7 @@ void quadtree_build_uniform(struct quadtree *qt, double res_max,
  * hanging-node masks computed. */
 void quadtree_build_graded(struct quadtree *qt, double res_max, int n_levels,
                            int fringe, const struct footprint *footprints,
-                           int n_footprints, leaf_active_fn active,
-                           void *data);
+                           int n_footprints, leaf_active_fn active, void *data);
 
 void quadtree_free(struct quadtree *qt);
 

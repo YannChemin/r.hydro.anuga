@@ -216,7 +216,8 @@ static void visit(struct graded *gr, int level, int64_t ix, int64_t iy)
             return;
         if (qt->n_leaves == gr->capacity) {
             gr->capacity = gr->capacity ? 2 * gr->capacity : 4096;
-            qt->leaves = G_realloc(qt->leaves, gr->capacity * sizeof(struct leaf));
+            qt->leaves =
+                G_realloc(qt->leaves, gr->capacity * sizeof(struct leaf));
         }
         qt->leaves[qt->n_leaves++] = lf;
     }
@@ -256,10 +257,10 @@ static void compute_hanging(struct quadtree *qt)
 
     hashmap_init(&h, qt->n_leaves);
     for (k = 0; k < qt->n_leaves; k++)
-        hashmap_put_new(&h,
-                        level_key(qt->leaves[k].level, qt->leaves[k].ix,
-                                  qt->leaves[k].iy),
-                        k);
+        hashmap_put_new(
+            &h,
+            level_key(qt->leaves[k].level, qt->leaves[k].ix, qt->leaves[k].iy),
+            k);
     for (k = 0; k < qt->n_leaves; k++) {
         struct leaf *lf = &qt->leaves[k];
         double size = quadtree_leaf_size(qt, lf), x0, y0, e;
@@ -295,8 +296,7 @@ static void compute_hanging(struct quadtree *qt)
 
 void quadtree_build_graded(struct quadtree *qt, double res_max, int n_levels,
                            int fringe, const struct footprint *footprints,
-                           int n_footprints, leaf_active_fn active,
-                           void *data)
+                           int n_footprints, leaf_active_fn active, void *data)
 {
     struct Cell_head region;
     struct graded gr;

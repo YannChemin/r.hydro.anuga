@@ -1,13 +1,13 @@
 # r.hydro.anuga: implementation plan
 
-Status: **phases 0–4 done** (2026-09-24). The OpenMP solver is bitwise
+Status: **phases 0–5 done** (2026-09-24). The OpenMP solver is bitwise
 identical to ANUGA's C kernels (phase 2). The OpenCL solver is bitwise
 identical to it without friction, on PoCL and on the WX 7100 (phase 3). Earlier:
 build, options, device
 selection, the `-p` pre-flight report, and single-level mesh construction
 (bitwise identical to `anuga.rectangular_cross`) with the scaled integer
 bed. The solver itself is not implemented yet.
-Revision 9 (2026-09-24), with the user's decisions on the licence, mesh, solver,
+Revision 10 (2026-09-24), with the user's decisions on the licence, mesh, solver,
 infiltration and elevation interpolation, plus the multi-resolution
 DEM requirement.
 
@@ -1116,11 +1116,62 @@ Each phase ends validated, committed, and with the manual updated.
     - Asynchronous double-buffered writing (phase 7). Output cost is
       currently negligible, as measured.
     - Fine detail grids (`-f`) need multi-level meshes (phase 5).
-- **Phase 5 — multi-resolution.** Multi-DEM stack (native-resolution
-  banded reading, bias check, blending), quadtree refinement, 2:1
-  balance, fringe dilation, all 16 templates, Morton ordering,
-  multi-grid output transfer, `mesh_level` map, pre-flight per level.
-  V2m, V4m, V5m, V11, and the multi-level part of V6.
+- **Phase 5 — multi-resolution. DONE 2026-09-24.**
+  - **`dem_stack.c`.**
+    - Each DEM is loaded at native resolution (whole map, in memory;
+      banded reading for very large LiDAR mosaics is deferred to phase
+      8), with count summed-area tables (exact integer counts).
+    - Box means are summed directly, not from prefix sums, which would
+      lose about 1e-8 m.
+    - The **bias check** (median and MAD of coarse − mean-of-fine over
+      coarse cells ≥ 90% covered) is fatal above `dem_bias_tolerance=`
+      unless `dem_offset=` is given (one value per map, in the order
+      given).
+    - Chamfer 3-4 distance to each finer footprint's edge; region edges
+      are not seams.
+    - Smooth-step **seam blending** over `blend_width` coarse cells.
+    - Point elevation is bilinear on the finest covering DEM (blended).
+      The leaf-centre elevation is the governing DEM's box mean, or its
+      bilinear value when the leaf is smaller than the DEM cells.
+  - **`quadtree_build_graded`.**
+    - Per level, from the finest down, a bitmap: that level's
+      footprints, plus the parents of the next finer bitmap dilated by
+      `fringe` (separable Chebyshev dilation, O(cells)).
+    - Split iff the cell is a parent of a finer required cell.
+    - Hanging masks come from finest-first leaf lookups just outside
+      each side at the quarter points, which also verifies 2:1 balance
+      (fatal otherwise).
+    - `refine=` + `refine_res=` add a footprint; `coarsen=` and
+      `relief_tolerance=` are fatal "not implemented" (phase 8).
+  - **`mesh.c`** needed no numerical change: the phase 1 clockwise fan
+    already handled hanging nodes (5–8 triangles per leaf).
+  - **`-f` detail outputs.** Every time-series map, summary raster and
+    final state is also written on a grid per finer DEM (its footprint
+    snapped to its level's leaf grid, at that level's cell size),
+    suffixed `_detail<k>`, by switching the raster output window per
+    grid.
+  - **Results:**
+    - **V2m**: lake at rest on a 4-level mesh (8/4/2/1 m, fringe 4,
+      bumpy bed crossing every level change, 2213 steps): momentum
+      ≤ 1.5e-14.
+    - **V4m**: ANUGA built from the exported multi-level points and
+      triangles (`validation/compare_state_anuga.py`, "exported
+      multi-level") gives a **bitwise identical** state, for lake at
+      rest and for a dam break with friction flowing through all levels
+      (4738 steps).
+    - **V5m**: a wave entering the 8→1 m fringe shows 0.01% reflection
+      (target < 1%); the transmitted peak is at the same place as in a
+      uniform run.
+    - OpenMP = OpenCL bitwise on the multi-level mesh without friction
+      (7208 steps).
+  - **Finding (friction, CPU vs GPU).** With Manning friction, `pow()`'s
+    few-ulp CPU/GPU differences can be amplified by wet/dry threshold
+    decisions in long wetting transients: up to about 1e-3 relative
+    after 4738 steps (the step counts still match). A bitwise-portable
+    power function (fixed IEEE operation sequence) would make OpenCL and
+    OpenMP identical but would lose bitwise equality with ANUGA, which
+    uses glibc `pow`. This could be an option (e.g. `-r`) if
+    cross-device reproducibility matters.
 - **Phase 6 — forcing and infiltration.** (a) Rain, evaporation,
   hyetograph, STRDS with explicit units, then Green–Ampt with soil
   table, direct rasters, `soil_depth`, `impervious`: V7i, V8i, V10.

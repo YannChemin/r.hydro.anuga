@@ -30,7 +30,7 @@ and cumulative infiltration. The module can also write rasters of
 maximum depth, speed, stage and hazard, arrival time, inundation
 duration, the mesh level, gauge time series and a mass balance report.
 
-**Development status:** phase 4 of the implementation plan
+**Development status:** phase 5 of the implementation plan
 (`PLAN.md`). The complete option set is defined and validated. The
 **-p** pre-flight report works: it selects the compute device,
 describes the DEM stack at native resolution, snaps the resolution
@@ -39,8 +39,10 @@ Single-DEM meshes can be built and inspected (mesh-only mode, below).
 The solver runs on the selected OpenCL device or with OpenMP, and its
 results are bitwise identical to ANUGA's own C kernels (OpenMP; OpenCL
 too when there is no friction). Raster time series, summary rasters and
-the mass balance table are written as described below. Multi-DEM meshes,
-rainfall and other forcing, and infiltration are not implemented yet.
+the mass balance table are written as described below. Meshes built
+from several DEMs at different resolutions work as described below.
+Rainfall and other forcing, and infiltration, are not implemented
+yet.
 
 ## NOTES
 
@@ -70,6 +72,39 @@ two, and the rounding is reported: 1 m and 30 m DEMs give levels of 1,
 **res_max** cells. Otherwise the module stops and prints an aligned
 *g.region* command. DEMs must have square cells. Latitude-longitude
 projects are not supported.
+
+### Several DEMs
+
+When **elevation** lists several DEMs, each is read at its own
+resolution. At each location the finest DEM with data governs the
+elevation (with **-o**, the order given is the priority order). Its
+resolution sets the mesh level there. **res_min** coarsens the finest
+level if needed.
+
+Around each finer area the mesh steps down one level at a time, with at
+least **fringe** cells of every intermediate level. For example, 2 m
+cells are surrounded by bands of 4, 8 and 16 m cells before reaching 32
+m. Neighbouring cells always differ by at most one level. A cell next to
+a finer neighbour is split into 5 to 8 triangles instead of 4, so the
+mesh stays conforming.
+
+**refine** (with **refine_res**) requests a finer resolution over any
+other area, such as a channel or a dike.
+
+Before meshing, each DEM is compared with the next coarser one where
+they overlap. If the median vertical difference exceeds
+**dem_bias_tolerance** (default 0.5 m), the module stops and reports
+it. Mixing vertical datums (for example NGF-IGN69 altitudes and EGM2008
+geoid heights) is a common cause. The difference is never corrected
+silently: give **dem_offset** (one value per map of **elevation**, in
+the same order) to apply a correction explicitly. Within tolerance, the
+seam is blended smoothly over **blend_width** cells of the coarser DEM,
+inside the finer DEM's footprint. Region edges are not treated as seams.
+
+With **-f**, every output (time series, summary rasters and final
+state) is also written on a detail grid over each finer DEM's
+footprint, at that DEM's mesh resolution. The names get the suffix
+`_detail1`, `_detail2`, and so on.
 
 ### Mesh-only mode
 

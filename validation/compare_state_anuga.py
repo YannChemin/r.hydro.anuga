@@ -37,13 +37,27 @@ def main(mesh_dir, state_dir):
     nx, ny = mesh_manifest["nx0"], mesh_manifest["ny0"]
     res = mesh_manifest["res_max"]
     n_tri = mesh["triangles"].shape[0]
-    if mesh_manifest["n_levels"] != 1 or n_tri != 4 * nx * ny:
-        msg = "Only single-level meshes over a full rectangle can be compared"
-        raise SystemExit(msg)
-
-    points, elements, boundary = anuga.rectangular_cross(
-        nx, ny, len1=nx * res, len2=ny * res
-    )
+    tags = mesh_manifest["boundary_tags"]
+    rectangle = mesh_manifest["n_levels"] == 1 and n_tri == 4 * nx * ny
+    if rectangle:
+        # Single level over a full rectangle: ANUGA's own rectangular_cross,
+        # whose triangles are matched to ours by centroid below.
+        points, elements, boundary = anuga.rectangular_cross(
+            nx, ny, len1=nx * res, len2=ny * res
+        )
+        tag_of_side = TAG_OF_SIDE
+    else:
+        # Multi-level or masked mesh: ANUGA builds its domain (geometry,
+        # neighbours, boundary enumeration) from our points and triangles.
+        points = mesh["nodes"]
+        elements = mesh["triangles"].astype(np.int64)
+        boundary = {
+            (int(k), int(e)): tags[int(t)]
+            for k, e, t in zip(
+                mesh["boundary_tri"], mesh["boundary_edge"], mesh["boundary_tag"]
+            )
+        }
+        tag_of_side = {side: side for side in tags}
     domain = anuga.Domain(points, elements, boundary)
     domain.set_flow_algorithm(state_manifest["algorithm"])
     domain.set_cfl(state_manifest["cfl"])
@@ -80,7 +94,6 @@ def main(mesh_dir, state_dir):
 
     # One boundary object per side, from the exported per-edge setup.
     types = state_manifest["boundary_types"]
-    tags = mesh_manifest["boundary_tags"]
     per_side = {}
     for j, tag_index in enumerate(mesh["boundary_tag"]):
         side = tags[int(tag_index)]
@@ -93,11 +106,11 @@ def main(mesh_dir, state_dir):
     boundaries = {}
     for side, (kind, value) in per_side.items():
         if kind == "reflective":
-            boundaries[TAG_OF_SIDE[side]] = anuga.Reflective_boundary(domain)
+            boundaries[tag_of_side[side]] = anuga.Reflective_boundary(domain)
         elif kind == "transmissive":
-            boundaries[TAG_OF_SIDE[side]] = anuga.Transmissive_boundary(domain)
+            boundaries[tag_of_side[side]] = anuga.Transmissive_boundary(domain)
         else:
-            boundaries[TAG_OF_SIDE[side]] = anuga.Dirichlet_boundary(list(value))
+            boundaries[tag_of_side[side]] = anuga.Dirichlet_boundary(list(value))
     domain.set_boundary(boundaries)
 
     # Read by init_gpu_domain when the unified interface is built.
@@ -137,6 +150,7 @@ def main(mesh_dir, state_dir):
             yield_t += yieldstep
     ext.sync_from_device(gpu_dom)
     results = {
+        "mesh": "rectangular_cross" if rectangle else "exported multi-level",
         "triangles": int(n_tri),
         "compute_mode": domain.compute_mode,
         "c_rk_loop": bool(getattr(domain, "use_c_rk_loop", False)),

@@ -92,11 +92,11 @@ static void build_edge_distance(struct dem_layer *l,
     int open_w = w->west <= region->west + eps;
     float *d = G_malloc((size_t)rows * cols * sizeof(float));
 
-#define D(rr, cc)                                                              \
-    (((rr) < 0)       ? (open_n ? CHAMFER_INF : 0.0f)                          \
-     : ((rr) >= rows) ? (open_s ? CHAMFER_INF : 0.0f)                          \
-     : ((cc) < 0)     ? (open_w ? CHAMFER_INF : 0.0f)                          \
-     : ((cc) >= cols) ? (open_e ? CHAMFER_INF : 0.0f)                          \
+#define D(rr, cc)                                     \
+    (((rr) < 0)       ? (open_n ? CHAMFER_INF : 0.0f) \
+     : ((rr) >= rows) ? (open_s ? CHAMFER_INF : 0.0f) \
+     : ((cc) < 0)     ? (open_w ? CHAMFER_INF : 0.0f) \
+     : ((cc) >= cols) ? (open_e ? CHAMFER_INF : 0.0f) \
                       : d[(size_t)(rr) * cols + (cc)])
 
     for (r = 0; r < rows; r++)
@@ -214,15 +214,15 @@ void dem_stack_load(struct dem_stack *st, const struct preflight *pf,
     for (i = 0; i < st->n; i++) {
         struct dem_layer *l = &st->layers[i];
 
-        G_message(_("Reading elevation map <%s> at %g m..."),
-                  pf->dems[i].name, pf->dems[i].res);
+        G_message(_("Reading elevation map <%s> at %g m..."), pf->dems[i].name,
+                  pf->dems[i].res);
         raster_grid_load(&l->grid, pf->dems[i].name);
         l->res = pf->dems[i].res;
         l->level = pf->dems[i].level;
         for (j = 0; j < n_offsets; j++)
             if (strcmp(names[j], pf->dems[i].name) == 0 ||
-                strcmp(names[j], G_fully_qualified_name(
-                                     pf->dems[i].name, pf->dems[i].mapset)) ==
+                strcmp(names[j], G_fully_qualified_name(pf->dems[i].name,
+                                                        pf->dems[i].mapset)) ==
                     0) {
                 l->offset = atof(offset_answers[j]);
                 has_offset[i] = 1;
@@ -252,8 +252,8 @@ void dem_stack_load(struct dem_stack *st, const struct preflight *pf,
                             "dem_bias_tolerance=). Check their vertical "
                             "datums, or give dem_offset= explicitly (e.g. "
                             "%.3f for <%s>)"),
-                          coarse->grid.name, fine->grid.name, median,
-                          tolerance, median, fine->grid.name);
+                          coarse->grid.name, fine->grid.name, median, tolerance,
+                          median, fine->grid.name);
     }
 }
 
@@ -294,8 +294,7 @@ static double blend_weight(const struct dem_layer *l, double x, double y)
     return d >= l->blend_width ? 1.0 : smoothstep(d / l->blend_width);
 }
 
-static double point_from(const struct dem_stack *st, int i, double x,
-                         double y)
+static double point_from(const struct dem_stack *st, int i, double x, double y)
 {
     for (; i < st->n; i++) {
         const struct dem_layer *l = &st->layers[i];
@@ -322,8 +321,8 @@ double dem_stack_point(const struct dem_stack *st, double x, double y)
     return point_from(st, 0, x, y);
 }
 
-static double box_from(const struct dem_stack *st, int i, double x0,
-                       double y0, double x1, double y1)
+static double box_from(const struct dem_stack *st, int i, double x0, double y0,
+                       double x1, double y1)
 {
     for (; i < st->n; i++) {
         const struct dem_layer *l = &st->layers[i];

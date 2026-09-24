@@ -146,15 +146,6 @@ def test_opencl_dequantization_is_bitwise(tools, tmp_path):
     )
 
 
-def test_several_dems_not_meshed_yet(tools, tmp_path):
-    tools.g_region(w=0, s=0, e=64, n=64, res=32)
-    tools.r_mapcalc(expression="coarse = 1")
-    tools.g_region(w=0, s=0, e=64, n=64, res=32)
-    tools.r_mapcalc(expression="coarse2 = 2")
-    with pytest.raises(ToolError, match="phase 5"):
-        build_mesh(tools, tmp_path, elevation="coarse,coarse2")
-
-
 def test_nothing_to_do(tools):
     tools.g_region(w=0, s=0, e=20, n=20, res=10)
     tools.r_mapcalc(expression="dem = 1")

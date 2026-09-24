@@ -68,8 +68,7 @@ static int32_t get_node(struct builder *b, int64_t gx, int64_t gy, double x,
     m->node_xy[2 * idx + 1] = y;
     m->node_key[idx] = (int64_t)key;
     if (!isfinite(elevation))
-        elevation =
-            dem_stack_point(b->dem, m->origin_x + x, m->origin_y + y);
+        elevation = dem_stack_point(b->dem, m->origin_x + x, m->origin_y + y);
     if (!isfinite(elevation))
         G_fatal_error(_("No elevation available at mesh node (%.3f, %.3f)"),
                       m->origin_x + x, m->origin_y + y);

@@ -216,12 +216,17 @@ static void grid_pass(struct out_grid *g, const struct quadtree *qt,
 }
 
 void out_grid_build(struct out_grid *g, const struct quadtree *qt,
-                    const struct mesh *m)
+                    const struct mesh *m, const struct Cell_head *win,
+                    const char *suffix)
 {
     long *first, *fill, cell, k, n_entries;
 
     memset(g, 0, sizeof(*g));
-    G_get_window(&g->win);
+    if (win)
+        g->win = *win;
+    else
+        G_get_window(&g->win);
+    G_strlcpy(g->suffix, suffix ? suffix : "", sizeof(g->suffix));
     g->n_cells = (long)g->win.rows * g->win.cols;
 
     /* Triangles of each leaf are contiguous, in leaf order. */
@@ -321,13 +326,14 @@ static int index_width(long n)
 }
 
 static void map_name(char *buf, size_t size, const struct output_options *opt,
-                     int q, long index, int width)
+                     const char *suffix, int q, long index, int width)
 {
     char digits[24];
 
     /* Width is at most 19 digits for a long. */
     snprintf(digits, sizeof(digits), "%0*ld", width > 19 ? 19 : width, index);
-    snprintf(buf, size, "%s_%s_%s", opt->basename, q_names[q], digits);
+    snprintf(buf, size, "%s%s_%s_%s", opt->basename, suffix, q_names[q],
+             digits);
 }
 
 static void check_raster(const char *name)
@@ -339,41 +345,49 @@ static void check_raster(const char *name)
                       name);
 }
 
-void output_check_names(const struct output_options *opt)
+void output_check_names(const struct output_options *opt, int n_detail)
 {
-    char name[GNAME_MAX * 2];
+    char name[GNAME_MAX * 2], suffix[32];
     const char *summaries[] = {opt->max_depth,    opt->max_speed,
                                opt->max_stage,    opt->max_hazard,
                                opt->arrival_time, opt->inundation_duration};
+    const char *final[] = {"stage", "xmom", "ymom"};
     long n, i;
-    int q, width;
+    int q, width, g;
     size_t j;
 
-    if (opt->basename) {
-        if (opt->output_step != floor(opt->output_step))
-            G_fatal_error(_("output_step= must be a whole number of seconds "
-                            "for time series outputs"));
-        n = n_outputs(opt);
-        width = index_width(n - 1);
-        for (q = 0; q < N_QUANTITIES; q++) {
-            if (!opt->quantity[q])
-                continue;
-            for (i = 0; i < n; i++) {
-                map_name(name, sizeof(name), opt, q, i, width);
+    if (opt->basename && opt->output_step != floor(opt->output_step))
+        G_fatal_error(_("output_step= must be a whole number of seconds "
+                        "for time series outputs"));
+    n = n_outputs(opt);
+    width = index_width(n - 1);
+    for (g = 0; g <= n_detail; g++) {
+        if (g == 0)
+            suffix[0] = '\0';
+        else
+            snprintf(suffix, sizeof(suffix), "_detail%d", g);
+        if (opt->basename)
+            for (q = 0; q < N_QUANTITIES; q++) {
+                if (!opt->quantity[q])
+                    continue;
+                for (i = 0; i < n; i++) {
+                    map_name(name, sizeof(name), opt, suffix, q, i, width);
+                    check_raster(name);
+                }
+            }
+        /* The main-grid summary names are checked by the parser. */
+        if (g > 0)
+            for (j = 0; j < sizeof(summaries) / sizeof(summaries[0]); j++)
+                if (summaries[j]) {
+                    snprintf(name, sizeof(name), "%s%s", summaries[j], suffix);
+                    check_raster(name);
+                }
+        if (opt->final_prefix)
+            for (j = 0; j < 3; j++) {
+                snprintf(name, sizeof(name), "%s%s_%s", opt->final_prefix,
+                         suffix, final[j]);
                 check_raster(name);
             }
-        }
-    }
-    for (j = 0; j < sizeof(summaries) / sizeof(summaries[0]); j++)
-        if (summaries[j])
-            check_raster(summaries[j]);
-    if (opt->final_prefix) {
-        const char *suffix[] = {"stage", "xmom", "ymom"};
-
-        for (j = 0; j < 3; j++) {
-            snprintf(name, sizeof(name), "%s_%s", opt->final_prefix, suffix[j]);
-            check_raster(name);
-        }
     }
 }
 
@@ -391,29 +405,32 @@ static void prepare_arrays(struct output_context *ctx, const struct sw_state *s)
 }
 
 void output_begin(struct output_context *ctx, const struct output_options *opt,
-                  const struct out_grid *grid, const struct evolve_log *log,
-                  const struct sw_state *s)
+                  const struct out_grid *grids, int n_grids,
+                  const struct evolve_log *log, const struct sw_state *s)
 {
-    int q;
+    int q, g;
 
     memset(ctx, 0, sizeof(*ctx));
     ctx->opt = opt;
-    ctx->grid = grid;
+    ctx->grids = grids;
+    ctx->n_grids = grids ? n_grids : 0;
+    G_get_window(&ctx->region);
     ctx->log = log;
     ctx->n_outputs = n_outputs(opt);
     ctx->index_width = index_width(ctx->n_outputs - 1);
     ctx->h = G_malloc((s->n > 0 ? s->n : 1) * sizeof(double));
 
     if (opt->basename)
-        for (q = 0; q < N_QUANTITIES; q++) {
-            if (!opt->quantity[q])
-                continue;
-            G_strlcpy(ctx->register_path[q], G_tempfile(), GPATH_MAX);
-            ctx->register_file[q] = fopen(ctx->register_path[q], "w");
-            if (!ctx->register_file[q])
-                G_fatal_error(_("Unable to write <%s>: %s"),
-                              ctx->register_path[q], strerror(errno));
-        }
+        for (g = 0; g < ctx->n_grids; g++)
+            for (q = 0; q < N_QUANTITIES; q++) {
+                if (!opt->quantity[q])
+                    continue;
+                ctx->register_path[g][q] = G_tempfile();
+                ctx->register_file[g][q] = fopen(ctx->register_path[g][q], "w");
+                if (!ctx->register_file[g][q])
+                    G_fatal_error(_("Unable to write <%s>: %s"),
+                                  ctx->register_path[g][q], strerror(errno));
+            }
 
     if (opt->massbalance) {
         ctx->massbal = fopen(opt->massbalance, "w");
@@ -460,9 +477,9 @@ static void write_massbalance(struct output_context *ctx,
 
 /* Cell values of the time series quantities. Returns 0 outside the mesh. */
 static int cell_values(const struct output_context *ctx,
-                       const struct sw_state *s, long cell, double *v)
+                       const struct out_grid *g, const struct sw_state *s,
+                       long cell, double *v)
 {
-    const struct out_grid *g = ctx->grid;
     double H = 0.0, S = 0.0, UH = 0.0, VH = 0.0, u = 0.0, w = 0.0, sp;
     long e;
 
@@ -521,35 +538,32 @@ static void set_metadata(const char *name, const char *title, const char *units)
         Rast_write_units(name, units);
 }
 
-void output_step_fn(struct sw_state *s, double t, void *data)
+/* Write the time series maps of one output time on grid gi. */
+static void write_step(struct output_context *ctx, int gi,
+                       const struct sw_state *s, double t, long index)
 {
-    struct output_context *ctx = data;
     const struct output_options *opt = ctx->opt;
-    const struct out_grid *g = ctx->grid;
+    const struct out_grid *g = &ctx->grids[gi];
     int fd[N_QUANTITIES], q, row, col;
     void *buf[N_QUANTITIES];
     char name[N_QUANTITIES][GNAME_MAX * 2];
-    long index = ctx->next_index++;
+    RASTER_MAP_TYPE type = opt->dcell ? DCELL_TYPE : FCELL_TYPE;
 
-    prepare_arrays(ctx, s);
-    write_massbalance(ctx, s, t);
-    if (!opt->basename)
-        return;
-
-    G_verbose_message(_("Writing outputs at t = %g s..."), t);
+    Rast_set_output_window((struct Cell_head *)&g->win);
     for (q = 0; q < N_QUANTITIES; q++) {
         if (!opt->quantity[q])
             continue;
-        map_name(name[q], sizeof(name[q]), opt, q, index, ctx->index_width);
-        fd[q] = Rast_open_new(name[q], opt->dcell ? DCELL_TYPE : FCELL_TYPE);
-        buf[q] = Rast_allocate_output_buf(opt->dcell ? DCELL_TYPE : FCELL_TYPE);
+        map_name(name[q], sizeof(name[q]), opt, g->suffix, q, index,
+                 ctx->index_width);
+        fd[q] = Rast_open_new(name[q], type);
+        buf[q] = Rast_allocate_output_buf(type);
     }
 
     for (row = 0; row < g->win.rows; row++) {
         for (col = 0; col < g->win.cols; col++) {
             double v[N_QUANTITIES];
             long cell = (long)row * g->win.cols + col;
-            int covered = cell_values(ctx, s, cell, v);
+            int covered = cell_values(ctx, g, s, cell, v);
             int dry = covered && v[Q_DEPTH] <= opt->min_depth;
 
             for (q = 0; q < N_QUANTITIES; q++) {
@@ -567,8 +581,7 @@ void output_step_fn(struct sw_state *s, double t, void *data)
         }
         for (q = 0; q < N_QUANTITIES; q++)
             if (opt->quantity[q])
-                Rast_put_row(fd[q], buf[q],
-                             opt->dcell ? DCELL_TYPE : FCELL_TYPE);
+                Rast_put_row(fd[q], buf[q], type);
     }
 
     for (q = 0; q < N_QUANTITIES; q++) {
@@ -588,25 +601,42 @@ void output_step_fn(struct sw_state *s, double t, void *data)
 
             gmtime_r(&tt, &tm);
             strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
-            fprintf(ctx->register_file[q], "%s|%s\n", name[q], when);
+            fprintf(ctx->register_file[gi][q], "%s|%s\n", name[q], when);
         }
         else {
-            fprintf(ctx->register_file[q], "%s|%lld\n", name[q], llround(t));
+            fprintf(ctx->register_file[gi][q], "%s|%lld\n", name[q],
+                    llround(t));
         }
     }
+    Rast_set_output_window(&ctx->region);
+}
+
+void output_step_fn(struct sw_state *s, double t, void *data)
+{
+    struct output_context *ctx = data;
+    long index = ctx->next_index++;
+    int g;
+
+    prepare_arrays(ctx, s);
+    write_massbalance(ctx, s, t);
+    if (!ctx->opt->basename)
+        return;
+    G_verbose_message(_("Writing outputs at t = %g s..."), t);
+    for (g = 0; g < ctx->n_grids; g++)
+        write_step(ctx, g, s, t, index);
 }
 
 /* ---- Summary rasters and registration ---------------------------------- */
 
 enum combine { COMBINE_MEAN, COMBINE_MAX, COMBINE_MIN_POSITIVE };
 
-static void write_summary(const struct output_context *ctx, const char *name,
-                          const double *values, enum combine how,
-                          const char *title, const char *units,
-                          const char *color, const struct sw_state *s,
-                          int null_if_dry)
+static void write_summary_grid(const struct output_context *ctx,
+                               const struct out_grid *g, const char *name,
+                               const double *values, enum combine how,
+                               const char *title, const char *units,
+                               const char *color, const struct sw_state *s,
+                               int null_if_dry)
 {
-    const struct out_grid *g = ctx->grid;
     const struct output_options *opt = ctx->opt;
     struct Colors colors;
     struct FPRange range;
@@ -615,6 +645,7 @@ static void write_summary(const struct output_context *ctx, const char *name,
     int fd, row, col;
     RASTER_MAP_TYPE type = opt->dcell ? DCELL_TYPE : FCELL_TYPE;
 
+    Rast_set_output_window((struct Cell_head *)&g->win);
     fd = Rast_open_new(name, type);
     buf = Rast_allocate_output_buf(type);
     for (row = 0; row < g->win.rows; row++) {
@@ -651,6 +682,25 @@ static void write_summary(const struct output_context *ctx, const char *name,
         Rast_make_fp_colors(&colors, color, min, max > min ? max : min + 1.0);
         Rast_write_colors(name, G_mapset(), &colors);
     }
+    Rast_set_output_window((struct Cell_head *)&ctx->region);
+}
+
+/* A summary raster on every grid: name on the main grid, name followed by
+ * the grid's suffix on the detail grids. */
+static void write_summary(const struct output_context *ctx, const char *name,
+                          const double *values, enum combine how,
+                          const char *title, const char *units,
+                          const char *color, const struct sw_state *s,
+                          int null_if_dry)
+{
+    char full[GNAME_MAX * 2];
+    int g;
+
+    for (g = 0; g < ctx->n_grids; g++) {
+        snprintf(full, sizeof(full), "%s%s", name, ctx->grids[g].suffix);
+        write_summary_grid(ctx, &ctx->grids[g], full, values, how, title, units,
+                           color, s, null_if_dry);
+    }
 }
 
 static void run_command(const char *cmd)
@@ -660,13 +710,14 @@ static void run_command(const char *cmd)
         G_fatal_error(_("Command failed: %s"), cmd);
 }
 
-static void register_strds(const struct output_context *ctx, int q)
+static void register_strds(const struct output_context *ctx, int g, int q)
 {
     const struct output_options *opt = ctx->opt;
     char strds[GNAME_MAX * 2], cmd[4 * GPATH_MAX];
     const char *ow = G_get_overwrite() ? " --overwrite" : "";
 
-    snprintf(strds, sizeof(strds), "%s_%s", opt->basename, q_names[q]);
+    snprintf(strds, sizeof(strds), "%s%s_%s", opt->basename,
+             ctx->grids[g].suffix, q_names[q]);
     snprintf(cmd, sizeof(cmd),
              "t.create --quiet%s output=%s type=strds temporaltype=%s "
              "semantictype=mean title=\"r.hydro.anuga %s\" "
@@ -675,7 +726,7 @@ static void register_strds(const struct output_context *ctx, int q)
              q_titles[q]);
     run_command(cmd);
     snprintf(cmd, sizeof(cmd), "t.register --quiet%s input=%s file=%s%s", ow,
-             strds, ctx->register_path[q],
+             strds, ctx->register_path[g][q],
              opt->absolute ? "" : " unit=seconds");
     run_command(cmd);
     snprintf(cmd, sizeof(cmd), "t.rast.colors --quiet input=%s color=%s", strds,
@@ -687,7 +738,7 @@ static void register_strds(const struct output_context *ctx, int q)
 void output_end(struct output_context *ctx, const struct sw_state *s)
 {
     const struct output_options *opt = ctx->opt;
-    int q;
+    int q, g;
 
     if (s->stats) {
         if (opt->max_depth)
@@ -715,33 +766,40 @@ void output_end(struct output_context *ctx, const struct sw_state *s)
                           _("Time with water above the arrival depth"), "s",
                           "bcyr", s, 1);
     }
-    if (opt->final_prefix) {
-        char name[GNAME_MAX * 2];
+    if (opt->final_prefix)
+        for (g = 0; g < ctx->n_grids; g++) {
+            const struct out_grid *grid = &ctx->grids[g];
+            char name[GNAME_MAX * 2];
 
-        snprintf(name, sizeof(name), "%s_stage", opt->final_prefix);
-        write_summary(ctx, name, s->stage_c, COMBINE_MEAN,
-                      _("Final water surface elevation"), "m", "elevation", s,
-                      0);
-        snprintf(name, sizeof(name), "%s_xmom", opt->final_prefix);
-        write_summary(ctx, name, s->xmom_c, COMBINE_MEAN,
-                      _("Final momentum, x component"), "m2/s", "differences",
-                      s, 0);
-        snprintf(name, sizeof(name), "%s_ymom", opt->final_prefix);
-        write_summary(ctx, name, s->ymom_c, COMBINE_MEAN,
-                      _("Final momentum, y component"), "m2/s", "differences",
-                      s, 0);
-    }
+            snprintf(name, sizeof(name), "%s%s_stage", opt->final_prefix,
+                     grid->suffix);
+            write_summary_grid(ctx, grid, name, s->stage_c, COMBINE_MEAN,
+                               _("Final water surface elevation"), "m",
+                               "elevation", s, 0);
+            snprintf(name, sizeof(name), "%s%s_xmom", opt->final_prefix,
+                     grid->suffix);
+            write_summary_grid(ctx, grid, name, s->xmom_c, COMBINE_MEAN,
+                               _("Final momentum, x component"), "m2/s",
+                               "differences", s, 0);
+            snprintf(name, sizeof(name), "%s%s_ymom", opt->final_prefix,
+                     grid->suffix);
+            write_summary_grid(ctx, grid, name, s->ymom_c, COMBINE_MEAN,
+                               _("Final momentum, y component"), "m2/s",
+                               "differences", s, 0);
+        }
 
     if (ctx->massbal) {
         fclose(ctx->massbal);
         ctx->massbal = NULL;
     }
-    for (q = 0; q < N_QUANTITIES; q++) {
-        if (!ctx->register_file[q])
-            continue;
-        fclose(ctx->register_file[q]);
-        register_strds(ctx, q);
-        remove(ctx->register_path[q]);
-    }
+    for (g = 0; g < ctx->n_grids; g++)
+        for (q = 0; q < N_QUANTITIES; q++) {
+            if (!ctx->register_file[g][q])
+                continue;
+            fclose(ctx->register_file[g][q]);
+            register_strds(ctx, g, q);
+            remove(ctx->register_path[g][q]);
+            G_free(ctx->register_path[g][q]);
+        }
     G_free(ctx->h);
 }

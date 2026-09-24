@@ -33,14 +33,18 @@ void output_mesh_level(const struct quadtree *qt, const char *name);
  * cell takes the triangle containing its centre. */
 struct out_grid {
     struct Cell_head win;
+    char suffix[32]; /* Appended to output names ("" for the main grid). */
     long n_cells;
     long *start;    /* n_cells + 1 offsets into tri/weight. */
     int32_t *tri;   /* Contributing triangles. */
     double *weight; /* Normalised weights (sum 1 per covered cell). */
 };
 
+/* Build the transfer onto win (NULL: the current region). suffix is
+ * appended to the names of the maps written on this grid. */
 void out_grid_build(struct out_grid *g, const struct quadtree *qt,
-                    const struct mesh *m);
+                    const struct mesh *m, const struct Cell_head *win,
+                    const char *suffix);
 void out_grid_free(struct out_grid *g);
 
 /* Time series quantities. */
@@ -65,6 +69,7 @@ struct output_options {
     double min_depth;           /* Dry threshold for writing */
     int null_dry;               /* -n */
     int dcell;                  /* -d */
+    int detail;                 /* -f: also write on the fine DEM footprints */
     int absolute;               /* start= given */
     double start_epoch;         /* start= as seconds since the epoch (UTC) */
     double output_step, duration;
@@ -75,17 +80,21 @@ struct output_options {
     const char *arrival_time, *inundation_duration, *final_prefix;
 };
 
+#define MAX_OUT_GRIDS (1 + MAX_DEMS)
+
 struct output_context {
     const struct output_options *opt;
-    const struct out_grid *grid;
+    const struct out_grid *grids; /* Main grid first, then detail grids. */
+    int n_grids;
+    struct Cell_head region;
     const struct evolve_log *log;
     double initial_signed_volume;
     long n_outputs, next_index;
     int index_width;
     double *h; /* Per-triangle depth at the current output. */
     FILE *massbal;
-    FILE *register_file[N_QUANTITIES];
-    char register_path[N_QUANTITIES][GPATH_MAX];
+    FILE *register_file[MAX_OUT_GRIDS][N_QUANTITIES];
+    char *register_path[MAX_OUT_GRIDS][N_QUANTITIES];
 };
 
 /* Parse outputs= answers into opt->quantity; fatal for unknown names. */
@@ -96,12 +105,13 @@ void output_parse_quantities(struct output_options *opt, char **answers);
 double output_parse_start(const char *text);
 
 /* Check that no output map or dataset exists unless --overwrite, before
- * any computation. */
-void output_check_names(const struct output_options *opt);
+ * any computation. n_detail is the number of detail grids (-f), named with
+ * the suffixes _detail1, _detail2, ... */
+void output_check_names(const struct output_options *opt, int n_detail);
 
 void output_begin(struct output_context *ctx, const struct output_options *opt,
-                  const struct out_grid *grid, const struct evolve_log *log,
-                  const struct sw_state *s);
+                  const struct out_grid *grids, int n_grids,
+                  const struct evolve_log *log, const struct sw_state *s);
 
 /* output_fn for evolve_run(): writes the rasters of one output time. */
 void output_step_fn(struct sw_state *s, double t, void *data);
