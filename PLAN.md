@@ -1186,11 +1186,13 @@ Each phase ends validated, committed, and with the manual updated.
     simulation ("not implemented yet") instead of being ignored; `-p`
     still accepts them to estimate the memory of a complete run.
     `max_timestep=` is honoured (default 1000 s, as ANUGA).
-  - **Tests:** 70 pytest tests pass on the laptop (PoCL), ANUGA
-    comparisons included. The final full run on the WX 7100 server was
-    interrupted three times by the machine freezing, the last time
-    during an OpenMP-only test (`test_fringe_reflection`, 32 threads);
-    no kernel message was logged.
+  - **Tests:** 70 pytest tests pass on the laptop (OpenMP, and
+    OpenCL on PoCL) and on the WX 7100 server (OpenCL on Clover, 3 min
+    30 s), ANUGA comparisons included. `R_HYDRO_ANUGA_TEST_DEVICE`
+    selects the device of the tests not bound to bitwise equality with
+    ANUGA; CPU threads are capped at half the cores, as the server froze
+    three times (no kernel message) under sustained load on all 32
+    threads.
 - **Phase 6 — forcing and infiltration.** (a) Rain, evaporation,
   hyetograph, STRDS with explicit units, then Green–Ampt with soil
   table, direct rasters, `soil_depth`, `impervious`: V7i, V8i, V10.
