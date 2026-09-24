@@ -8,15 +8,17 @@ import subprocess
 import numpy as np
 import pytest
 
+from conftest import TEST_DEVICE
 from mesh_test import REPO, anuga_python, load_export
 
 G = 9.8  # anuga.config.g
 
 
 def run(tools, tmp_path, name="run", **kwargs):
-    """Run the solver with mesh and state exports; return both."""
+    """Run the solver with mesh and state exports; return both. The device
+    defaults to R_HYDRO_ANUGA_TEST_DEVICE."""
     mesh_dir, state_dir = tmp_path / f"{name}_mesh", tmp_path / f"{name}_state"
-    kwargs.setdefault("device", "omp")
+    kwargs.setdefault("device", TEST_DEVICE)
     tools.r_hydro_anuga(
         mesh_output=str(mesh_dir), state_output=str(state_dir), **kwargs
     )
@@ -37,7 +39,8 @@ def run(tools, tmp_path, name="run", **kwargs):
 def test_bitwise_equal_to_anuga(
     tools, tmp_path, algorithm, friction, boundary, duration, step
 ):
-    """V4: same final state and number of steps as ANUGA's C kernels."""
+    """V4: same final state and number of steps as ANUGA's C kernels
+    (OpenMP: OpenCL's pow() is only accurate to a few ulp)."""
     python = anuga_python()
     tools.g_region(n=200, s=0, e=1000, w=0, res=10)
     tools.r_mapcalc(expression="dem = -0.002 * x() + 0.3 * sin(y() / 40)")
@@ -45,6 +48,7 @@ def test_bitwise_equal_to_anuga(
     *_, mesh_dir, state_dir = run(
         tools,
         tmp_path,
+        device="omp",
         elevation="dem",
         initial_depth="h0",
         duration=duration,

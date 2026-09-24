@@ -8,6 +8,8 @@ import pytest
 
 from grass.tools import ToolError
 
+from conftest import TEST_DEVICE
+
 
 def dam_break(tools):
     tools.g_region(n=200, s=0, e=1000, w=0, res=10)
@@ -21,7 +23,7 @@ COMMON = {
     "duration": 120,
     "output_step": 30,
     "boundary": "west:dirichlet:2.5,east:transmissive",
-    "device": "omp",
+    "device": TEST_DEVICE,
 }
 
 
@@ -164,7 +166,7 @@ def test_opencl_rasters_equal_openmp(tools):
     if not opencl_available(tools):
         pytest.skip("No OpenCL device with double precision")
     dam_break(tools)
-    params = dict(COMMON, manning_value=0)
+    params = dict(COMMON, manning_value=0, device="omp")
     tools.r_hydro_anuga(output="a", flags="d", outputs="depth,speed", **params)
     params["device"] = "auto"
     tools.r_hydro_anuga(output="b", flags="d", outputs="depth,speed", **params)

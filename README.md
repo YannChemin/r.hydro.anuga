@@ -118,7 +118,17 @@ grass --tmp-project XY --exec python3 -m pytest tests
 ```
 
 The tests find the module on `PATH`, in `R_HYDRO_ANUGA_BIN_DIR`, or in
-`$HOME/dev/grass/dist.*/bin`. OpenCL tests are skipped without a double
+`$HOME/dev/grass/dist.*/bin`. `R_HYDRO_ANUGA_TEST_DEVICE=auto` (or `gpu`,
+`cpu`) runs the solver and output tests on OpenCL instead of OpenMP;
+the tests requiring bitwise equality with ANUGA always use OpenMP:
+
+```sh
+R_HYDRO_ANUGA_TEST_DEVICE=auto grass --tmp-project XY --exec python3 -m pytest tests
+```
+
+CPU threads (OpenMP, ANUGA's included, and PoCL) are limited to half the
+cores unless `OMP_NUM_THREADS`, `POCL_CPU_MAX_CU_COUNT` or
+`POCL_MAX_PTHREAD_COUNT` are set. OpenCL tests are skipped without a double
 precision OpenCL device. The ANUGA comparison tests need ANUGA in
 `.venv-anuga` (or `ANUGA_PYTHON`) and are skipped otherwise:
 

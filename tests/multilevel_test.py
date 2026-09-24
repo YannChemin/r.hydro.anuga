@@ -8,6 +8,7 @@ import pytest
 
 from grass.tools import ToolError
 
+from conftest import TEST_DEVICE
 from mesh_test import REPO, anuga_python
 from solver_test import run
 
@@ -72,6 +73,7 @@ def test_bitwise_equal_to_anuga_on_multilevel_mesh(tools, tmp_path):
         output_step=30,
         manning_value=0.025,
         boundary="east:transmissive",
+        device="omp",
     )
     result = subprocess.run(
         [
@@ -225,7 +227,7 @@ def test_detail_outputs(tools):
         output="ml",
         max_depth="ml_maxd",
         flags="f",
-        device="omp",
+        device=TEST_DEVICE,
     )
     region = tools.r_info(map="ml_detail1_depth_002", flags="g").keyval
     assert float(region["nsres"]) == 1 and region["rows"] == 128

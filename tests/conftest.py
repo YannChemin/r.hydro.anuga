@@ -4,6 +4,12 @@ Each fixture creates a throwaway project, so no sample dataset is needed.
 The module is looked up on PATH first, then in R_HYDRO_ANUGA_BIN_DIR, then
 in the GRASS source tree's dist directory ($HOME/dev/grass/dist.*/bin),
 so tests run against a development build without installing it.
+
+R_HYDRO_ANUGA_TEST_DEVICE (omp, auto, gpu or cpu; default omp) selects
+the device of the tests that do not require bitwise equality with ANUGA.
+CPU threads (OpenMP, including ANUGA's, and PoCL) are capped at half the
+available cores unless OMP_NUM_THREADS, POCL_CPU_MAX_CU_COUNT or
+POCL_MAX_PTHREAD_COUNT are already set.
 """
 
 import glob
@@ -17,6 +23,23 @@ import grass.script as gs
 from grass.tools import Tools
 
 MODULE = "r.hydro.anuga"
+
+TEST_DEVICE = os.environ.get("R_HYDRO_ANUGA_TEST_DEVICE", "omp")
+
+# Some test machines are not stable under a sustained load on every core.
+# Set before any session copies the environment, so the module and the
+# ANUGA comparison scripts inherit it.
+HALF_CORES = str(max(1, len(os.sched_getaffinity(0)) // 2))
+for _var in ("OMP_NUM_THREADS", "POCL_CPU_MAX_CU_COUNT", "POCL_MAX_PTHREAD_COUNT"):
+    os.environ.setdefault(_var, HALF_CORES)
+
+
+def pytest_report_header(config):
+    return (
+        f"r.hydro.anuga: device={TEST_DEVICE}, "
+        f"OMP_NUM_THREADS={os.environ['OMP_NUM_THREADS']}, "
+        f"POCL_CPU_MAX_CU_COUNT={os.environ['POCL_CPU_MAX_CU_COUNT']}"
+    )
 
 
 def _module_bin_dir():
