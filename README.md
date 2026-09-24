@@ -156,5 +156,4 @@ PATH=$PWD/.venv-anuga/bin:$PATH .venv-anuga/bin/pip install \
 ## Licence
 
 GPL-3.0-or-later (`LICENSE`). Code derived from ANUGA keeps ANUGA's
-Apache-2.0 notice (`LICENSE.ANUGA`). Developed with AI assistance
-(Claude).
+Apache-2.0 notice (`LICENSE.ANUGA`). 
